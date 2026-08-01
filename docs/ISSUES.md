@@ -22,3 +22,9 @@ If `afterFileEdit` omits workspace **and** `stop` uses a different conversation 
 ### I-4 — live Cursor desktop E2E
 
 Not automatable from unittest. Manual smoke in README (“Manual Cursor smoke”). Run once after install before calling Cursor support verified.
+
+### I-7 — chat-scoped gate, not deliverable-scoped (MVP boundary)
+
+**Accepted for MVP.** One `lens_run` in a chat (Cursor: write-time window from earliest side-channel stamp, or `session` tag; Claude: F3.1 `ts ≥` transcript first-event) clears later watched writes in that same chat — a second unreviewed deliverable can slip through.
+
+Symmetric on both hosts; not introduced by the P1 fix. US-6 reads per-deliverable in spirit; tightening would mean scoping the gate to deliverable keys (and associating writes → keys). Defer until pilot data shows multi-deliverable chats are common enough to inflate skip/metric noise.
