@@ -82,7 +82,7 @@ Implementation half (scaffold: pb_prd_scaffold). Everything above is the framing
 
 Scope: package the proven v0 loop (runner agent + named lens files + run log) into one private repo that installs on any machine — a Claude Code plugin (`.claude-plugin/`) and a Cursor plugin (`.cursor-plugin/`, **desktop IDE**; the CLI surface is excluded, §10) sharing config, contracts, and the run log — so the loop cannot be silently skipped on either host's covered surface. Codex: out of scope, port sketch in Appendix B.
 
-**Success criteria (evaluated at M3 — seven days after hook activation):** plugin installed and passing `/lens-doctor` on 2 laptops; Stop-hook enforcement active on both hosts (Cursor: desktop IDE); ≥ 90% of `hook_check` records with `watched_writes=true` also have `lens_run_found=true` (§7.6, measurement window per §9, min 10 such records, both hosts pooled); ≥ 1 `lens_run` logged from Cursor (`host: "cursor"`); ≥ 5 deliverables carry `human_review` lines.
+**Success criteria (evaluated at M3 — seven days after hook activation):** plugin installed and passing `/lens-doctor` on 2 laptops; Stop-hook enforcement active on both hosts (Cursor: desktop IDE); ≥ 90% of `hook_check` records with `enforce=true` and `wrote_watched=true` also have `blocked=false` (§7.6, measurement window per §9, min 10 such records, both hosts pooled — Cursor prune means `watched_writes∧lens_run_found` is the wrong join); ≥ 1 `lens_run` logged from Cursor (`host: "cursor"`); ≥ 5 deliverables carry `human_review` lines.
 
 ## 2. Target users & roles
 
@@ -346,27 +346,9 @@ A lens is a markdown file resolved from a configured name (`lenses` map or `lens
 
 ### 7.6 `hook_check` record (appended by the Stop hook, F3.4)
 
-```json
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "hook_check.schema.json",
-  "type": "object",
-  "required": ["ts", "event", "session", "watched_writes", "lens_run_found", "blocked", "duration_ms"],
-  "properties": {
-    "ts": { "type": "string", "format": "date-time" },
-    "event": { "const": "hook_check" },
-    "session": { "type": "string", "description": "session id from the transcript path" },
-    "watched_writes": { "type": "boolean" },
-    "lens_run_found": { "type": "boolean" },
-    "blocked": { "type": "boolean" },
-    "duration_ms": { "type": "number", "minimum": 0 },
-    "host": { "enum": ["claude-code", "cursor"], "description": "absent in records written before Cursor support = claude-code" }
-  },
-  "additionalProperties": false
-}
-```
+Canonical schema: `contracts/hook_check.schema.json`. Notable fields beyond the required core: `wrote_watched` (any watched activity in the session — M3 join key), `watched_writes` (unsatisfied remainder after Cursor `after_ts` filter), `session_ids`, `enforce`, `gate` (`none`|`time`|`session`), `excluded_writes`, `skip_reason`.
 
-Shares the run-log file; analyses select by `event`, so the newest-record-per-deliverable rule for `lens_run` is unaffected.
+Shares the run-log file; analyses select by `event`, so the newest-record-per-deliverable rule for `lens_run` is unaffected. M3 uses `enforce=true ∧ wrote_watched=true → blocked=false`, not `watched_writes ∧ lens_run_found` (Cursor prune makes the latter structurally empty on healthy loops).
 
 ## 8. Technical constraints & preferences
 

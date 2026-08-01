@@ -100,27 +100,51 @@ def run_check(
     if not transcript_path and real:
         after_ts = latest_lens_run_ts(cfg.log_path, real)
 
+    # Full session activity (for M3 metric) — ignore after_ts.
+    written_all, _ = gather_writes(
+        transcript_path,
+        sidechannel_paths=side_paths,
+        watch_globs=cfg.watch_globs,
+        after_ts=None,
+    )
+    watched_all, excluded_count = filter_watched(
+        written_all, cfg.watch_globs, cwd
+    )
+    wrote_watched = len(watched_all) > 0
+
     written, first_ts = gather_writes(
         transcript_path,
         sidechannel_paths=side_paths,
         watch_globs=cfg.watch_globs,
         after_ts=after_ts,
     )
-    watched, excluded_count = filter_watched(written, cfg.watch_globs, cwd)
+    watched, _ = filter_watched(written, cfg.watch_globs, cwd)
     watched_writes = len(watched) > 0
     lens_run_found = False
     gate = "none"
     if watched_writes:
-        # Time window when we have a session/write start; else fail closed.
         # pass and escalated terminal lens_run records both satisfy the gate.
-        if has_lens_run_since(cfg.log_path, first_ts):
-            lens_run_found = True
-            gate = "time"
-        elif has_lens_run_for_sessions(
-            cfg.log_path, real, since_iso=first_ts
-        ):
-            lens_run_found = True
-            gate = "session"
+        if transcript_path:
+            # Claude F3.1: transcript time window (session == transcript).
+            if has_lens_run_since(cfg.log_path, first_ts):
+                lens_run_found = True
+                gate = "time"
+            elif has_lens_run_for_sessions(
+                cfg.log_path, real, since_iso=first_ts
+            ):
+                lens_run_found = True
+                gate = "session"
+        else:
+            # Cursor: session-scoped only — never a global time gate (cross-chat leak).
+            if has_lens_run_for_sessions(
+                cfg.log_path, real, since_iso=first_ts
+            ):
+                lens_run_found = True
+                gate = "session"
+    elif wrote_watched and after_ts and real:
+        # Cursor: writes existed but all fall at/before the latest session lens_run.
+        lens_run_found = True
+        gate = "session"
 
     should_block = bool(cfg.enforce and watched_writes and not lens_run_found)
     if not watched_writes:
@@ -155,9 +179,9 @@ def run_check(
     skip_reason = None
     if watched_writes and not cfg.enforce:
         skip_reason = "enforce_false"
-    elif not watched_writes and written:
+    elif not watched_writes and written_all and not wrote_watched:
         skip_reason = "no_watch_match"
-    elif excluded_count and not watched_writes:
+    elif excluded_count and not wrote_watched:
         skip_reason = "excluded_only"
 
     record: Dict[str, Any] = {
@@ -166,6 +190,7 @@ def run_check(
         "session": session,
         "session_ids": ids,
         "watched_writes": watched_writes,
+        "wrote_watched": wrote_watched,
         "lens_run_found": lens_run_found,
         "blocked": should_block,
         "enforce": cfg.enforce,

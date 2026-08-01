@@ -2,14 +2,51 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "hook_check.schema.json",
   "type": "object",
-  "required": ["ts", "event", "session", "watched_writes", "lens_run_found", "blocked", "duration_ms"],
+  "required": [
+    "ts",
+    "event",
+    "session",
+    "watched_writes",
+    "lens_run_found",
+    "blocked",
+    "duration_ms"
+  ],
   "properties": {
     "ts": { "type": "string", "format": "date-time" },
     "event": { "const": "hook_check" },
-    "session": { "type": "string", "description": "session id from the transcript path" },
-    "watched_writes": { "type": "boolean" },
+    "session": {
+      "type": "string",
+      "description": "primary conversation/session id for this check"
+    },
+    "session_ids": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "all known conversation/session ids for this stop"
+    },
+    "watched_writes": {
+      "type": "boolean",
+      "description": "unsatisfied watched writes remain for this check (after Cursor after_ts filter)"
+    },
+    "wrote_watched": {
+      "type": "boolean",
+      "description": "session had any watched-path writes (ignores after_ts); used for M3 success metric"
+    },
     "lens_run_found": { "type": "boolean" },
     "blocked": { "type": "boolean" },
+    "enforce": { "type": "boolean" },
+    "gate": {
+      "enum": ["none", "time", "session"],
+      "description": "which gate satisfied lens_run_found; none if unsatisfied or no watched writes"
+    },
+    "excluded_writes": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "writes dropped by ~/.claude or system-temp exclusion"
+    },
+    "skip_reason": {
+      "type": "string",
+      "description": "why enforcement did not block despite activity (enforce_false, no_watch_match, excluded_only)"
+    },
     "duration_ms": { "type": "number", "minimum": 0 },
     "host": {
       "enum": ["claude-code", "cursor"],

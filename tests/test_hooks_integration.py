@@ -350,6 +350,52 @@ class HookIntegrationTests(unittest.TestCase):
         self.assertFalse(rec["lens_run_found"])
         self.assertTrue(rec["blocked"])
 
+    def test_cursor_newer_other_session_run_does_not_leak(self):
+        """Cursor must not use a global time gate — other chat's newer run must not clear this one."""
+        _run_hook(
+            CURSOR_EDIT,
+            {
+                "file_path": str(self.deliverable),
+                "conversation_id": "chat-x",
+                "workspace_roots": [str(self.td)],
+            },
+            self.env,
+        )
+        time.sleep(1.05)
+        with self.log.open("a", encoding="utf-8") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "ts": utc_now_iso(),
+                        "event": "lens_run",
+                        "lens": "review",
+                        "deliverable": "other",
+                        "rounds": 1,
+                        "verdict": "pass",
+                        "host": "cursor",
+                        "session": "chat-y",
+                        "findings": [],
+                        "escalations": [],
+                    }
+                )
+                + "\n"
+            )
+        stop = _run_hook(
+            CURSOR_STOP,
+            {
+                "status": "completed",
+                "conversation_id": "chat-x",
+                "workspace_roots": [str(self.td)],
+            },
+            self.env,
+        )
+        out = json.loads(stop.stdout)
+        self.assertIn("followup_message", out)
+        rec = json.loads(self.log.read_text(encoding="utf-8").strip().splitlines()[-1])
+        self.assertTrue(rec["blocked"])
+        self.assertEqual(rec.get("gate"), "none")
+        self.assertTrue(rec.get("wrote_watched"))
+
     def test_cursor_second_write_after_lens_run_still_enforces(self):
         """I-7 light: writes after a session lens_run still require a new review."""
         _run_hook(
