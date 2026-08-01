@@ -2,7 +2,7 @@
 
 Personal review standards for AI agents. One private repo installs on any Mac as a **Claude Code plugin** and a **Cursor plugin**, sharing config, contracts, and a JSONL run log.
 
-Canonical product + implementation spec: [`docs/PRD.md`](docs/PRD.md). Open implementation residuals: [`docs/ISSUES.md`](docs/ISSUES.md).
+Canonical product + implementation spec: [`docs/PRD.md`](docs/PRD.md). Open implementation residuals: [`docs/ISSUES.md`](docs/ISSUES.md). Cutting a version: [`docs/RELEASE.md`](docs/RELEASE.md).
 
 ## Prerequisites
 

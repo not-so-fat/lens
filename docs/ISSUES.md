@@ -12,6 +12,7 @@ Tracked gaps from Cursor/Claude hook regression work. Decisions below reflect 20
 6. **I-6 doctor consistency** — validates PLUGIN_ROOT vars and expanded scripts exist.
 7. **I-1 warning** — `afterFileEdit` stderr warns when workspace root is absent.
 8. **P1 unbounded Cursor gate** — `has_lens_run_since(None)` no longer matches any historical run; side-channel lines are `ts\\tpath` so Cursor gets a write-time window; optional `session` / `session_ids` on `lens_run` as backup. Covered by `test_cursor_stale_lens_run_does_not_unblock_fresh_conversation`.
+9. **Runner drift (#9)** — Claude/Cursor agent files stay separate (host Logging differs); must-match spans use `<!-- SHARED:… -->` markers and `tests/test_runner_consistency.py`. See [`docs/RELEASE.md`](RELEASE.md).
 
 ## Remaining (not code bugs)
 
