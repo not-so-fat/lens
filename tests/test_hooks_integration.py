@@ -241,6 +241,40 @@ class HookIntegrationTests(unittest.TestCase):
         self.assertTrue(rec["blocked"])
         self.assertEqual(rec.get("gate"), "none")
 
+    def test_claude_untagged_lens_run_still_satisfies(self):
+        """Bash-appended Claude runs may omit session — forgive if in time window."""
+        transcript = self._transcript_with_write()
+        with self.log.open("a", encoding="utf-8") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "ts": "2026-08-01T10:00:02.000Z",
+                        "event": "lens_run",
+                        "lens": "review",
+                        "deliverable": "out",
+                        "rounds": 1,
+                        "verdict": "pass",
+                        "host": "claude-code",
+                        "findings": [],
+                        "escalations": [],
+                    }
+                )
+                + "\n"
+            )
+        proc = _run_hook(
+            CLAUDE_STOP,
+            {
+                "transcript_path": str(transcript),
+                "session_id": "sess-1",
+                "cwd": str(self.td),
+            },
+            self.env,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        rec = json.loads(self.log.read_text(encoding="utf-8").strip().splitlines()[-1])
+        self.assertFalse(rec["blocked"])
+        self.assertTrue(rec["lens_run_found"])
+
     def test_cursor_after_file_edit_then_stop_blocks(self):
         """Cursor stop often has little transcript — sidechannel is the critical path."""
         edit = _run_hook(

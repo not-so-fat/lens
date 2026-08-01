@@ -12,7 +12,6 @@ from .config import Config, ConfigError, resolve_config
 from .log import (
     append_record,
     has_lens_run_for_sessions,
-    has_lens_run_since,
     latest_lens_run_ts,
 )
 from .paths import filter_watched
@@ -123,20 +122,18 @@ def run_check(
     lens_run_found = False
     gate = "none"
     if watched_writes:
-        # pass and escalated terminal lens_run records both satisfy the gate.
-        # Both hosts: session-scoped + time window (ts ≥ first_ts). Never a
-        # global any-session time gate — that leaked across concurrent chats.
-        if real and has_lens_run_for_sessions(
-            cfg.log_path, real, since_iso=first_ts
+        # Session-scoped + time window. Claude may omit session on Bash-appended
+        # runs (allow_untagged); runs tagged for another session never match.
+        # Claude Stop always has a session id (payload or transcript stem).
+        ids_for_gate = real or ([session] if session and session != "unknown" else [])
+        if has_lens_run_for_sessions(
+            cfg.log_path,
+            ids_for_gate,
+            since_iso=first_ts,
+            allow_untagged=bool(transcript_path),
         ):
             lens_run_found = True
             gate = "session"
-        elif not real and transcript_path and has_lens_run_since(
-            cfg.log_path, first_ts
-        ):
-            # Stop payload had no session id — last-resort F3.1 time window.
-            lens_run_found = True
-            gate = "time"
     elif wrote_watched and after_ts and real:
         # Cursor: writes existed but all fall at/before the latest session lens_run.
         lens_run_found = True
@@ -153,9 +150,16 @@ def run_check(
             f"(enforce=false). {INVOCATION_TEMPLATE}"
         )
     else:
+        sess_hint = (
+            f" Ensure the lens_run includes session={session!r} "
+            "(or omit session only on Claude Bash appends)."
+            if host == "claude-code"
+            else f" Ensure the lens_run includes session={session!r}."
+        )
         message = (
-            "Lens enforcement: this session wrote watched files but no lens_run "
-            f"was logged at or after the session start ({first_ts or 'unknown'}). "
+            "Lens enforcement: this session wrote watched files but no matching "
+            f"lens_run was logged at or after the session start ({first_ts or 'unknown'})."
+            f"{sess_hint} "
             f"{INVOCATION_TEMPLATE} "
             f"Watched writes: {', '.join(watched[:8])}"
             + ("…" if len(watched) > 8 else "")

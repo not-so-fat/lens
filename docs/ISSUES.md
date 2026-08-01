@@ -17,7 +17,7 @@ Tracked gaps from Cursor/Claude hook regression work. Decisions below reflect 20
 
 ### I-8 — Claude global time gate — fixed
 
-Both hosts session-scope the gate (`has_lens_run_for_sessions` + `ts ≥` window). Claude `lens_run` stamps `session` like Cursor. Global `has_lens_run_since` remains only when the Stop payload has no session id. Regression: `test_claude_newer_other_session_run_does_not_leak`.
+Both hosts session-scope the gate. Claude also **forgives untagged** in-window `lens_run`s (Bash append footgun) but rejects runs tagged for another session. Claude Stop always has a session id (payload or transcript stem) — no separate global time-gate branch. Prefer `append-run --session`. Regressions: `test_claude_newer_other_session_run_does_not_leak`, `test_claude_untagged_lens_run_still_satisfies`.
 
 ## Remaining (not code bugs)
 

@@ -78,33 +78,46 @@ def has_lens_run_since(log_path: Path, since_iso: Optional[str]) -> bool:
     return False
 
 
+def _lens_run_session_ids(rec: Dict[str, Any]) -> set:
+    ids = set()
+    if rec.get("session"):
+        ids.add(str(rec["session"]))
+    for sid in rec.get("session_ids") or []:
+        if sid:
+            ids.add(str(sid))
+    return ids
+
+
 def has_lens_run_for_sessions(
     log_path: Path,
     session_ids: Sequence[str],
     *,
     since_iso: Optional[str] = None,
+    allow_untagged: bool = False,
 ) -> bool:
     """
-    True if a lens_run is tagged with any of the current conversation/session ids.
+    True if a lens_run satisfies this session's gate.
 
-    Optional since_iso further requires the run to be at/after that instant
-    (so an earlier review in the same chat does not clear later writes).
+    - Tagged with this session (or conversation) id, or
+    - Untagged (no session fields) when allow_untagged=True — forgives Claude
+      Bash-appended runs that omit session; still rejects runs tagged for a
+      *different* session (keeps cross-chat leak closed).
+
+    Optional since_iso requires ts ≥ that instant.
     Both pass and escalated verdicts count.
     """
     wanted = {str(s) for s in session_ids if s and s != "unknown"}
-    if not wanted:
+    if not wanted and not allow_untagged:
         return False
     since = parse_iso_ts(since_iso) if since_iso else None
     for rec in iter_records(log_path):
         if rec.get("event") != "lens_run":
             continue
-        rec_ids = set()
-        if rec.get("session"):
-            rec_ids.add(str(rec["session"]))
-        for sid in rec.get("session_ids") or []:
-            if sid:
-                rec_ids.add(str(sid))
-        if not (rec_ids & wanted):
+        rec_ids = _lens_run_session_ids(rec)
+        if rec_ids:
+            if not wanted or not (rec_ids & wanted):
+                continue
+        elif not allow_untagged:
             continue
         if since is None:
             return True

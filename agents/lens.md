@@ -56,7 +56,9 @@ A round is **terminal** when the verdict is PASS or every finding is ESCALATE (n
 - Prior rounds' findings and the worker's stated reaction to each come from the worker's prompt — include them all in `findings` with their round numbers.
 - This round's ESCALATE findings get `reaction: "escalated"`.
 - On a non-terminal round (new FIX findings), do NOT log — the worker will return.
-- Append with Bash (create parent dirs / file if missing); never rewrite existing lines.
+- Prefer appending via the plugin CLI (injects/validates shape):  
+  `PYTHONPATH=python python3 -m lens_lib append-run --host claude-code --session '<session_id>' --json '...'`  
+  Bash append is allowed but must include `"session"` when known; untagged runs still satisfy the gate if `ts` is in-window, but runs tagged for another session never do.
 - `ts` must come from `date -u +%Y-%m-%dT%H:%M:%SZ` — never estimated.
 - Always include `"host": "claude-code"`.
 - Either `verdict: "pass"` or `"escalated"` is a terminal `lens_run` and satisfies the Stop-hook gate (enforcement does not require pass).
