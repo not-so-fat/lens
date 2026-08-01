@@ -49,9 +49,10 @@ First dual-host plugin release (Claude Code + Cursor desktop).
 
 ### Install
 - Claude: `claude plugin marketplace add not-so-fat/lens` then `claude plugin install lens@lens-plugins`
-- Cursor: import this repo / tag as Team Marketplace or local plugin, then `/lens-doctor`
+- Cursor (local, pin tag): `git archive v0.1.0 | tar -x -C ~/.cursor/plugins/local/lens` (after `mkdir -p` that dir), Reload Window, `/lens-doctor`
+- Cursor (Team Marketplace): import `https://github.com/not-so-fat/lens` (pin `v0.1.0`), install `lens`, reload, `/lens-doctor`
 
-Pin installs to tag `v0.1.0` when you need a frozen revision.
+Pin installs to tag `v0.1.0` when you need a frozen revision. See README “Install — Cursor” for the full copy-paste sequence.
 EOF
 ```
 

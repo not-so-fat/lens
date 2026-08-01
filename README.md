@@ -52,7 +52,19 @@ New session should list the `lens` agent. Run `/lens-doctor`.
 
 ## Install — Cursor (desktop IDE)
 
-Import this repo as a Team Marketplace / local plugin, then `/lens-doctor`.
+**Local (verified):** pin a tag, copy into Cursor’s local plugins dir (do not symlink outside that tree — Cursor rejects it), reload, then doctor:
+
+```bash
+git clone https://github.com/not-so-fat/lens.git /tmp/lens && cd /tmp/lens
+git checkout v0.1.0
+rm -rf ~/.cursor/plugins/local/lens
+mkdir -p ~/.cursor/plugins/local/lens
+git archive v0.1.0 | tar -x -C ~/.cursor/plugins/local/lens
+```
+
+Then **Developer: Reload Window**, open any workspace, run `/lens-doctor`.
+
+**Team Marketplace:** Cursor → Customize → Plugins → Import marketplace → `https://github.com/not-so-fat/lens` (or pin the `v0.1.0` tag), install `lens`, reload, `/lens-doctor`.
 
 Hook commands use `${CURSOR_PLUGIN_ROOT}` (plugin install dir), **not** `./python/...` relative to your project. You do **not** copy hook scripts into each workspace — one plugin install covers every folder you open.
 
