@@ -15,6 +15,10 @@ Tracked gaps from Cursor/Claude hook regression work. Decisions below reflect 20
 9. **Runner drift (#9)** — Claude/Cursor agent files stay separate (host Logging differs); must-match spans use `<!-- SHARED:… -->` markers and `tests/test_runner_consistency.py`. See [`docs/RELEASE.md`](RELEASE.md).
 10. **Cursor gate is session-scoped only** — no global `has_lens_run_since` on the no-transcript path (cross-chat leak). M3 join key is `wrote_watched` + `blocked=false`, not `watched_writes∧lens_run_found`.
 
+### I-8 — Claude F3.1 still uses a global time gate (by-spec, ship)
+
+Claude keeps `has_lens_run_since` (any session’s `lens_run` with `ts ≥` transcript first-event). Concurrent Claude sessions can theoretically cross-satisfy; M3 would count that as success (`blocked=false`). Low frequency if sessions are sequential. To close later: stamp `session` on Claude `lens_run`s (like Cursor) and prefer `has_lens_run_for_sessions` on the Claude path too.
+
 ## Remaining (not code bugs)
 
 ### I-1 residual — host contract
