@@ -122,7 +122,7 @@ Acceptance:
 
 **US-3 (plugin). Enforcement.** As a lens owner, I want a turn that wrote watched files blocked at its Stop-hook firing until a lens run is logged, so the loop cannot be silently skipped.
 Acceptance:
-- [ ] the Stop-hook firing blocks (exit 2, message names the missing step) when the session has written files matching `watch_globs` (fnmatch against cwd-relative and absolute paths; never `~/.claude/` or system temp — §7.4) and the log has no `lens_run` with `ts` ≥ the transcript's first-event time
+- [ ] the Stop-hook firing blocks (exit 2, message names the missing step) when the session has written files matching `watch_globs` (fnmatch against cwd-relative and absolute paths; never `~/.claude/` or system temp — §7.4) and the log has no same-session `lens_run` with `ts` ≥ the transcript's first-event time
 - [ ] the firing passes when such a `lens_run` exists, when no watched files were written, or when `enforce=false`
 - [ ] every firing appends a `hook_check` record (§7.6)
 - [ ] false-block rate meets NFR-3 (evaluated at M3, over the §9 window)
@@ -170,7 +170,7 @@ Deferred stories (deck card fetch, Codex host, correction-capture automation): s
 
 | Req | Requirement | Acceptance |
 | --- | --- | --- |
-| F3.1 | The Stop hook fires at each turn end with the session transcript path; it detects session writes matching `watch_globs` (§7.4 matching rules) and checks `log_path` for a `lens_run` with `ts` ≥ the transcript's first-event time | US-3 acceptance |
+| F3.1 | The Stop hook fires at each turn end with the session transcript path; it detects session writes matching `watch_globs` (§7.4 matching rules) and checks `log_path` for a `lens_run` tagged with this session (or conversation) id and `ts` ≥ the transcript's first-event time | US-3 acceptance |
 | F3.2 | Block message tells the worker exactly what to do (invoke `lens` agent, deliverable key convention) | message contains the §7.3 invocation template |
 | F3.3 | `enforce=false` in config disables blocking but the hook still emits a one-line warning | toggling requires no reinstall |
 | F3.4 | Every firing appends a `hook_check` record (§7.6) to the run log, including its own `duration_ms` | §1 criterion 3, NFR-3, and NFR-4 are computable from the log alone |

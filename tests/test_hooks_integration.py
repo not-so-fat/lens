@@ -165,6 +165,7 @@ class HookIntegrationTests(unittest.TestCase):
                         "rounds": 1,
                         "verdict": "pass",
                         "host": "claude-code",
+                        "session": "sess-1",
                         "findings": [],
                         "escalations": [],
                     }
@@ -204,6 +205,41 @@ class HookIntegrationTests(unittest.TestCase):
             self.env,
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    def test_claude_newer_other_session_run_does_not_leak(self):
+        """I-8: Claude gate is session-scoped — another session's run must not clear this one."""
+        transcript = self._transcript_with_write()
+        with self.log.open("a", encoding="utf-8") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "ts": "2026-08-01T10:00:02.000Z",
+                        "event": "lens_run",
+                        "lens": "review",
+                        "deliverable": "other",
+                        "rounds": 1,
+                        "verdict": "pass",
+                        "host": "claude-code",
+                        "session": "other-sess",
+                        "findings": [],
+                        "escalations": [],
+                    }
+                )
+                + "\n"
+            )
+        proc = _run_hook(
+            CLAUDE_STOP,
+            {
+                "transcript_path": str(transcript),
+                "session_id": "sess-1",
+                "cwd": str(self.td),
+            },
+            self.env,
+        )
+        self.assertEqual(proc.returncode, 2, proc.stderr)
+        rec = json.loads(self.log.read_text(encoding="utf-8").strip().splitlines()[-1])
+        self.assertTrue(rec["blocked"])
+        self.assertEqual(rec.get("gate"), "none")
 
     def test_cursor_after_file_edit_then_stop_blocks(self):
         """Cursor stop often has little transcript — sidechannel is the critical path."""

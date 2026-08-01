@@ -45,12 +45,14 @@ A round is **terminal** when the verdict is PASS or every finding is ESCALATE (n
 {"ts": "<UTC ISO8601>", "event": "lens_run", "lens": "<lens name>",
  "deliverable": "<short description or repo path — the worker must reuse the same key every round>",
  "rounds": <this round number>, "verdict": "pass | escalated", "host": "claude-code",
+ "session": "<session_id from this Claude Code session>",
  "findings": [{"round": 1, "check": "...", "target": "...", "severity": "FIX | ESCALATE",
                "reaction": "fixed | fixed-class | disputed | escalated", "note": "..."}],
  "escalations": ["the specific question, if any"]}
 ```
 
 - `"lens"` is the **name** (not the file path).
+- `"session"` must be this Claude Code session id (Stop-hook gate is session-scoped; omit only if unknown).
 - Prior rounds' findings and the worker's stated reaction to each come from the worker's prompt — include them all in `findings` with their round numbers.
 - This round's ESCALATE findings get `reaction: "escalated"`.
 - On a non-terminal round (new FIX findings), do NOT log — the worker will return.

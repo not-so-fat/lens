@@ -216,6 +216,7 @@ class LogAndCheckTests(unittest.TestCase):
                         "rounds": 1,
                         "verdict": "pass",
                         "host": "claude-code",
+                        "session": "sess",
                         "findings": [],
                         "escalations": [],
                     },

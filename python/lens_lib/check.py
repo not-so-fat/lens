@@ -124,23 +124,19 @@ def run_check(
     gate = "none"
     if watched_writes:
         # pass and escalated terminal lens_run records both satisfy the gate.
-        if transcript_path:
-            # Claude F3.1: transcript time window (session == transcript).
-            if has_lens_run_since(cfg.log_path, first_ts):
-                lens_run_found = True
-                gate = "time"
-            elif has_lens_run_for_sessions(
-                cfg.log_path, real, since_iso=first_ts
-            ):
-                lens_run_found = True
-                gate = "session"
-        else:
-            # Cursor: session-scoped only — never a global time gate (cross-chat leak).
-            if has_lens_run_for_sessions(
-                cfg.log_path, real, since_iso=first_ts
-            ):
-                lens_run_found = True
-                gate = "session"
+        # Both hosts: session-scoped + time window (ts ≥ first_ts). Never a
+        # global any-session time gate — that leaked across concurrent chats.
+        if real and has_lens_run_for_sessions(
+            cfg.log_path, real, since_iso=first_ts
+        ):
+            lens_run_found = True
+            gate = "session"
+        elif not real and transcript_path and has_lens_run_since(
+            cfg.log_path, first_ts
+        ):
+            # Stop payload had no session id — last-resort F3.1 time window.
+            lens_run_found = True
+            gate = "time"
     elif wrote_watched and after_ts and real:
         # Cursor: writes existed but all fall at/before the latest session lens_run.
         lens_run_found = True
