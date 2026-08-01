@@ -1,0 +1,16 @@
+{
+  "description": "Lens Stop-hook enforcement for Claude Code",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/python/claude_stop.py\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hook_check.schema.json",
+  "type": "object",
+  "required": ["ts", "event", "session", "watched_writes", "lens_run_found", "blocked", "duration_ms"],
+  "properties": {
+    "ts": { "type": "string", "format": "date-time" },
+    "event": { "const": "hook_check" },
+    "session": { "type": "string", "description": "session id from the transcript path" },
+    "watched_writes": { "type": "boolean" },
+    "lens_run_found": { "type": "boolean" },
+    "blocked": { "type": "boolean" },
+    "duration_ms": { "type": "number", "minimum": 0 },
+    "host": {
+      "enum": ["claude-code", "cursor"],
+      "description": "absent in records written before Cursor support = claude-code"
+    }
+  },
+  "additionalProperties": false
+}

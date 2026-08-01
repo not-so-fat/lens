@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "config.schema.json",
+  "type": "object",
+  "required": ["vault_root"],
+  "properties": {
+    "vault_root": {
+      "type": "string",
+      "description": "absolute path to the knowledge base holding Direction/Lenses/ and Metadata/usage/"
+    },
+    "enforce": { "type": "boolean", "default": true },
+    "watch_globs": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": ["**/*.md", "**/*.html", "**/*.pptx"],
+      "description": "fnmatch patterns tested against each written file's path relative to the session working directory AND its absolute path; paths under ~/.claude/ and the system temp directory never match"
+    }
+  },
+  "additionalProperties": false
+}
