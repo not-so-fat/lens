@@ -67,10 +67,19 @@ def parse_lens_file(path: Path) -> LensParseResult:
     )
 
 
-def default_lens_path(vault_root: Path, lens: str = "yusuke") -> Path:
+def default_lens_path(vault_root: Path, lens: str) -> Path:
     return vault_root / "Direction" / "Lenses" / f"{lens}.md"
 
 
-def find_lens(vault_root: Path, lens: str = "yusuke") -> Optional[Path]:
+def find_lens(vault_root: Path, lens: str) -> Optional[Path]:
     path = default_lens_path(vault_root, lens)
     return path if path.is_file() else None
+
+
+def discover_lens_name(vault_root: Path) -> Optional[str]:
+    """First *.md stem under Direction/Lenses/ (sorted), if any."""
+    lenses = vault_root / "Direction" / "Lenses"
+    if not lenses.is_dir():
+        return None
+    names = sorted(p.stem for p in lenses.glob("*.md") if p.is_file())
+    return names[0] if names else None

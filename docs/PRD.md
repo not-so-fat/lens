@@ -13,7 +13,7 @@ triaged:
 triage_note:
 promotes-to:
 related:
-  - "[[Direction/Lenses/yusuke]]"
+  - "`Direction/Lenses/<lens>.md`"
   - "[[Sources/Ideas/personal/2026-07-30 Buddy-agent experiment — lens runner brief]]"
   - "[[Sources/Ideas/personal/2026-07-30 Task-Specific Lenses — Product Insight from the Half-Year Review Session]]"
   - "[[Sources/Ideas/personal/2026-07-31 Taste profile — extracted from session history]]"
@@ -34,7 +34,7 @@ source: "Claude Code sessions 2026-07-30/31 — buddy-agent experiment, run-log 
 ## Problem
 
 - Agent output volume outruns human review capacity, and review is where leverage dies ([[Sources/Ideas/personal/2026-07-25 AI Leverage Benchmark — Verification Is the Bottleneck]]).
-- Most review findings are simple for the reviewer — the agent just doesn't share their priorities, boundaries, or standards. Measured personally: ~12 correction rounds ≈ one restated ask (baseline in [[Direction/Lenses/yusuke]]).
+- Most review findings are simple for the reviewer — the agent just doesn't share their priorities, boundaries, or standards. Measured personally: ~12 correction rounds ≈ one restated ask (baseline in the owner lens).
 - Corrections don't compound: the most-repeated correction was given 5+ times across separate sessions (taste extraction: 23 sessions, ~180 feedback moments).
 - The standards exist — but in one person's head, restated one correction at a time, siloed per host (Claude Code, Cursor, Codex) and per machine; every new session starts from zero.
 
@@ -291,8 +291,8 @@ Input:
   "type": "object",
   "required": ["round", "deliverable"],
   "properties": {
-    "lens": { "type": "string", "default": "yusuke" },
-    "area": { "type": "string", "default": "kite" },
+    "lens": { "type": "string", "description": "falls back to config default_lens" },
+    "area": { "type": "string", "description": "falls back to config default_area" },
     "round": { "type": "integer", "minimum": 1 },
     "deliverable": { "type": "string", "description": "stable key; identical across rounds" },
     "files": { "type": "array", "items": { "type": "string" } },
@@ -318,6 +318,8 @@ Output: verdict `PASS | FIX | ESCALATE`; findings and escalations exactly as the
   "required": ["vault_root"],
   "properties": {
     "vault_root": { "type": "string", "description": "absolute path to the knowledge base holding Direction/Lenses/ and Metadata/usage/" },
+    "default_lens": { "type": "string", "description": "stem of Direction/Lenses/<name>.md when the worker omits lens" },
+    "default_area": { "type": "string", "description": "area tag when the worker omits area" },
     "enforce": { "type": "boolean", "default": true },
     "watch_globs": {
       "type": "array",
@@ -332,7 +334,7 @@ Output: verdict `PASS | FIX | ESCALATE`; findings and escalations exactly as the
 
 ### 7.5 Lens file input shape (opinionated — the runner never infers)
 
-A lens is a markdown file at `<vault_root>/Direction/Lenses/<lens>.md`. Required, in this order: YAML frontmatter; `## Core principle`; `## When To Run This`; `## Process` — free prose or numbered prelude steps allowed, then one or more bold `**<Check block>?**` question blocks of bullet checks, optionally a closing `Finish:` line; `## Failure-Mode Guards`. Additional sections (an H1 title, `## Stable priors`, …) are allowed and ignored by validation. Every slug maps to exactly one Process bullet, but not every bullet carries a slug; a finding that fires on an uncovered check mints one per F2.3. The canonical slug list lives in the runner agent file (F2.3). A file missing `## Process` or containing no check block fails `/lens-doctor` (F4.3) and the runner declines it at invocation. Shape verified against the canonical `Direction/Lenses/yusuke.md`.
+A lens is a markdown file at `<vault_root>/Direction/Lenses/<lens>.md`. Required, in this order: YAML frontmatter; `## Core principle`; `## When To Run This`; `## Process` — free prose or numbered prelude steps allowed, then one or more bold `**<Check block>?**` question blocks of bullet checks, optionally a closing `Finish:` line; `## Failure-Mode Guards`. Additional sections (an H1 title, `## Stable priors`, …) are allowed and ignored by validation. Every slug maps to exactly one Process bullet, but not every bullet carries a slug; a finding that fires on an uncovered check mints one per F2.3. The canonical slug list lives in the runner agent file (F2.3). A file missing `## Process` or containing no check block fails `/lens-doctor` (F4.3) and the runner declines it at invocation. Shape verified against the canonical `Direction/Lenses/<lens>.md`.
 
 ### 7.6 `hook_check` record (appended by the Stop hook, F3.4)
 
@@ -396,21 +398,21 @@ Dependency order, no calendar estimates — the build is expected to land in abo
 | M2 — deploy (laptop 2) | `/lens-close` (F4.2); install both hosts on laptop 2; US-4 + US-5 acceptance pass |
 | M3 — pilot readout | Seven days of real usage after M1 hook activation: §1 success criteria and all §9 NFRs evaluated over their stated windows |
 
-Owner for all milestones: Yusuke (side project).
+Owner for all milestones: lens owner (side project).
 
 ## 12. Open decisions
 
 | Question | Default if undecided | Owner |
 | --- | --- | --- |
-| Multiple vaults on one machine? | plugin release: one `vault_root`; per-project override via `LENS_VAULT_ROOT` | Yusuke |
-| Does the hook watch code files too? | plugin release: no — `watch_globs` defaults target documents; code review stays with existing tools | Yusuke |
-| Cursor install scope? | user-level (`~/.cursor/`), not per-project — standards are personal, not per-repo | Yusuke |
+| Multiple vaults on one machine? | plugin release: one `vault_root`; per-project override via `LENS_VAULT_ROOT` | lens owner |
+| Does the hook watch code files too? | plugin release: no — `watch_globs` defaults target documents; code review stays with existing tools | lens owner |
+| Cursor install scope? | user-level (`~/.cursor/`), not per-project — standards are personal, not per-repo | lens owner |
 
 (Session identification and the slug vocabulary's home were open in draft; both are now specified — F3.1 and F2.3.)
 
 ## 13. How to use this document
 
-- **Human (Yusuke):** the product half (above the divider) carries the Decision and open questions; in the PRD, review §1 success criteria and §12 defaults — everything else is implementation.
+- **Human (lens owner):** the product half (above the divider) carries the Decision and open questions; in the PRD, review §1 success criteria and §12 defaults — everything else is implementation.
 - **AI codegen:** load `docs/PRD.md`; implement one Req at a time in F-number order; check acceptance boxes as you verify; use §7 schemas verbatim (copy into `contracts/`); when a choice isn't specified, pick the minimum that satisfies the acceptance box; §10 is a hard stop-list.
 - **Reference implementation:** the working v0 runner at `~/.claude/agents/lens.md` — port, don't reinvent (F2.1).
 
@@ -420,7 +422,7 @@ Owner for all milestones: Yusuke (side project).
 | --- | --- |
 | [[Sources/Ideas/personal/2026-07-30 Buddy-agent experiment — lens runner brief]] | §7.1/§7.2 record shapes' origin, known v0 gap, dedupe rule |
 | v0 runner (`~/.claude/agents/lens.md`) + run log (`Metadata/usage/lens_runs.jsonl`) | F2 semantics, §7.1 field shapes as logged in practice |
-| [[Direction/Lenses/yusuke]] | lens input shape (§7.5), slug vocabulary |
+| `Direction/Lenses/<lens>.md` | lens input shape (§7.5), slug vocabulary |
 | AI-Codegen PRD Scaffold (`pb_prd_scaffold`, product deck) | PRD section structure, contracts/NFR/open-decision conventions |
 | Cursor & Codex feasibility section (above, with doc URLs) | F5 mechanisms; Appendix B port sketch |
 

@@ -164,8 +164,8 @@ class LogAndCheckTests(unittest.TestCase):
                     {
                         "ts": "2026-07-31T10:00:02.000Z",
                         "event": "lens_run",
-                        "lens": "yusuke",
-                        "area": "kite",
+                        "lens": "sample",
+                        "area": "work",
                         "deliverable": "doc",
                         "rounds": 1,
                         "verdict": "pass",
@@ -212,8 +212,8 @@ class LogAndCheckTests(unittest.TestCase):
                     {
                         "ts": "2026-07-31T10:00:02.000Z",
                         "event": "lens_run",
-                        "lens": "yusuke",
-                        "area": "kite",
+                        "lens": "sample",
+                        "area": "work",
                         "deliverable": "d1",
                         "rounds": 1,
                         "verdict": "pass",
@@ -236,12 +236,8 @@ class LogAndCheckTests(unittest.TestCase):
 
 
 class LensParseTests(unittest.TestCase):
-    def test_yusuke_shape(self):
-        path = Path(
-            "/Users/not_so_fat/workspace/obsidian/lexicon-personal/Direction/Lenses/yusuke.md"
-        )
-        if not path.is_file():
-            self.skipTest("vault lens not present")
+    def test_sample_lens_shape(self):
+        path = ROOT / "tests" / "fixtures" / "sample_lens.md"
         result = parse_lens_file(path)
         self.assertTrue(result.ok, result.errors)
         self.assertGreaterEqual(result.check_blocks, 1)

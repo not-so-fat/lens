@@ -18,6 +18,8 @@ class Config:
     vault_root: Path
     enforce: bool = True
     watch_globs: List[str] = field(default_factory=lambda: list(DEFAULT_WATCH_GLOBS))
+    default_lens: Optional[str] = None
+    default_area: Optional[str] = None
     source: str = "unknown"  # "env" | "config" | "env+config"
 
 
@@ -30,6 +32,8 @@ Lens config missing. Create ~/.lens/config.json:
 
 {
   "vault_root": "/absolute/path/to/your/vault",
+  "default_lens": "<lens-file-stem>",
+  "default_area": "<area-tag>",
   "enforce": true,
   "watch_globs": ["**/*.md", "**/*.html", "**/*.pptx"]
 }
@@ -50,6 +54,17 @@ def _load_file() -> Tuple[Optional[dict], Optional[Path]]:
     return data, path
 
 
+def _optional_str(data: Optional[dict], key: str) -> Optional[str]:
+    if not data:
+        return None
+    val = data.get(key)
+    if val is None or val == "":
+        return None
+    if not isinstance(val, str):
+        raise ConfigError(f"{key} must be a string")
+    return val
+
+
 def resolve_config() -> Config:
     """Resolve vault_root and options. Raises ConfigError with setup text."""
     env_root = os.environ.get("LENS_VAULT_ROOT", "").strip()
@@ -60,11 +75,20 @@ def resolve_config() -> Config:
         enforce = True
         watch = list(DEFAULT_WATCH_GLOBS)
         source = "env"
+        default_lens = _optional_str(file_data, "default_lens")
+        default_area = _optional_str(file_data, "default_area")
         if file_data:
             enforce = bool(file_data.get("enforce", True))
             watch = list(file_data.get("watch_globs") or DEFAULT_WATCH_GLOBS)
             source = "env+config"
-        return Config(vault_root=vault, enforce=enforce, watch_globs=watch, source=source)
+        return Config(
+            vault_root=vault,
+            enforce=enforce,
+            watch_globs=watch,
+            default_lens=default_lens,
+            default_area=default_area,
+            source=source,
+        )
 
     if file_data:
         root = file_data.get("vault_root")
@@ -76,13 +100,21 @@ def resolve_config() -> Config:
             vault_root=expand_path(root),
             enforce=bool(file_data.get("enforce", True)),
             watch_globs=list(file_data.get("watch_globs") or DEFAULT_WATCH_GLOBS),
+            default_lens=_optional_str(file_data, "default_lens"),
+            default_area=_optional_str(file_data, "default_area"),
             source="config",
         )
 
     raise ConfigError(SETUP_INSTRUCTIONS)
 
 
-def write_config(vault_root: str, enforce: bool = True, watch_globs: Optional[List[str]] = None) -> Path:
+def write_config(
+    vault_root: str,
+    enforce: bool = True,
+    watch_globs: Optional[List[str]] = None,
+    default_lens: Optional[str] = None,
+    default_area: Optional[str] = None,
+) -> Path:
     path = lens_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     payload: dict[str, Any] = {
@@ -90,5 +122,9 @@ def write_config(vault_root: str, enforce: bool = True, watch_globs: Optional[Li
         "enforce": enforce,
         "watch_globs": watch_globs or list(DEFAULT_WATCH_GLOBS),
     }
+    if default_lens:
+        payload["default_lens"] = default_lens
+    if default_area:
+        payload["default_area"] = default_area
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     return path

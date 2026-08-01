@@ -17,13 +17,15 @@ mkdir -p ~/.lens
 cat > ~/.lens/config.json <<'EOF'
 {
   "vault_root": "/absolute/path/to/your/vault",
+  "default_lens": "<stem of Direction/Lenses/<name>.md>",
+  "default_area": "<area tag for run logs>",
   "enforce": true,
   "watch_globs": ["**/*.md", "**/*.html", "**/*.pptx"]
 }
 EOF
 ```
 
-Override for one session: `export LENS_VAULT_ROOT=/absolute/path/to/your/vault`.
+Override vault for one session: `export LENS_VAULT_ROOT=/absolute/path/to/your/vault`.
 
 ## Install — Claude Code
 
@@ -46,7 +48,7 @@ Cursor CLI hook delivery is excluded (§10 of the PRD).
 
 Worker agents invoke the `lens` subagent with:
 
-- `lens` (default `yusuke`), `area` (default `kite`), `round`, `deliverable` (stable key)
+- `lens` / `area` (from config `default_lens` / `default_area` if omitted), `round`, `deliverable` (stable key)
 - `files` / `sources`, and on later rounds `prior_findings` + reactions
 
 On a terminal round the runner appends one `lens_run` line to `<vault>/Metadata/usage/lens_runs.jsonl`.

@@ -3,7 +3,7 @@
   "name": "lens-plugins",
   "description": "Lens — personal review standards for AI agents",
   "owner": {
-    "name": "Yusuke"
+    "name": "lens"
   },
   "plugins": [
     {

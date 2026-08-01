@@ -78,7 +78,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p_doc = sub.add_parser("doctor", help="validate lens install")
-    p_doc.add_argument("--lens", default="yusuke")
+    p_doc.add_argument(
+        "--lens",
+        default=None,
+        help="lens file stem (default: config default_lens, else first under Direction/Lenses/)",
+    )
     p_doc.add_argument("--write-config", metavar="VAULT_ROOT")
     p_doc.add_argument("--no-fix-sandbox", action="store_true")
     p_doc.set_defaults(func=cmd_doctor)

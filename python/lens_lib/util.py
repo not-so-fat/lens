@@ -44,7 +44,8 @@ def run_log_path(vault_root: Path) -> Path:
 
 INVOCATION_TEMPLATE = (
     "Invoke the `lens` agent with: "
-    'lens=<name default yusuke>, area=<name default kite>, round=<n>, '
+    "lens=<stem from config default_lens or explicit>, "
+    "area=<from config default_area or explicit>, round=<n>, "
     'deliverable="<stable key>", files=[...], sources=[...], '
     "and on rounds after the first: prior_findings + your reaction per finding. "
     "Reuse the same deliverable key every round."

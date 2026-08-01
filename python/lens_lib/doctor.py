@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from .config import ConfigError, resolve_config, write_config
-from .lens_parse import default_lens_path, parse_lens_file
+from .lens_parse import default_lens_path, discover_lens_name, parse_lens_file
 from .log import ensure_log
 from .sandbox import ensure_vault_readonly, sandbox_path, vault_in_sandbox
 from .util import claude_home, cursor_home, expand_path, run_log_path
@@ -94,7 +94,7 @@ def _hooks_registered_cursor(plugin_root: Optional[Path]) -> tuple[bool, str]:
 
 def run_doctor(
     *,
-    lens_name: str = "yusuke",
+    lens_name: Optional[str] = None,
     fix_sandbox: bool = True,
     write_vault: Optional[str] = None,
 ) -> DoctorReport:
@@ -108,7 +108,9 @@ def run_doctor(
         report.add(
             "config",
             True,
-            f"source={cfg.source} vault_root={cfg.vault_root} enforce={cfg.enforce}",
+            f"source={cfg.source} vault_root={cfg.vault_root} "
+            f"default_lens={cfg.default_lens!r} default_area={cfg.default_area!r} "
+            f"enforce={cfg.enforce}",
         )
     except ConfigError as e:
         report.add("config", False, str(e))
@@ -130,17 +132,26 @@ def run_doctor(
         str(lenses_dir) if lenses_dir.is_dir() else f"missing {lenses_dir}",
     )
 
-    lens_path = default_lens_path(cfg.vault_root, lens_name)
-    parsed = parse_lens_file(lens_path)
-    report.add(
-        "lens_shape",
-        parsed.ok,
-        (
-            f"{lens_path} ok; check_blocks={parsed.check_blocks}"
-            if parsed.ok
-            else f"{lens_path}: " + "; ".join(parsed.errors)
-        ),
-    )
+    resolved_lens = lens_name or cfg.default_lens or discover_lens_name(cfg.vault_root)
+    if not resolved_lens:
+        report.add(
+            "lens_shape",
+            False,
+            "no lens to validate — set config default_lens, pass --lens, "
+            "or add Direction/Lenses/<name>.md",
+        )
+    else:
+        lens_path = default_lens_path(cfg.vault_root, resolved_lens)
+        parsed = parse_lens_file(lens_path)
+        report.add(
+            "lens_shape",
+            parsed.ok,
+            (
+                f"{lens_path} ok; check_blocks={parsed.check_blocks}"
+                if parsed.ok
+                else f"{lens_path}: " + "; ".join(parsed.errors)
+            ),
+        )
 
     try:
         log_path = ensure_log(cfg.vault_root)

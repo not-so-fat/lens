@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Personal review standards for AI agents — runner, stop-hook enforcement, run log",
   "author": {
-    "name": "Yusuke"
+    "name": "lens"
   },
   "repository": "https://github.com/not-so-fat/lens",
   "keywords": ["lens", "review", "enforcement"],

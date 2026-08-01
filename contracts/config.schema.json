@@ -8,6 +8,14 @@
       "type": "string",
       "description": "absolute path to the knowledge base holding Direction/Lenses/ and Metadata/usage/"
     },
+    "default_lens": {
+      "type": "string",
+      "description": "stem of Direction/Lenses/<name>.md used when the worker omits lens"
+    },
+    "default_area": {
+      "type": "string",
+      "description": "area tag used when the worker omits area"
+    },
     "enforce": { "type": "boolean", "default": true },
     "watch_globs": {
       "type": "array",
