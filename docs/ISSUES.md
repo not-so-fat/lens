@@ -19,6 +19,8 @@ Tracked gaps from Cursor/Claude hook regression work. Decisions below reflect 20
 
 Both hosts session-scope the gate. Claude also **forgives untagged** in-window `lens_run`s (Bash append footgun) but rejects runs tagged for another session. Claude Stop always has a session id (payload or transcript stem) — no separate global time-gate branch. Prefer `append-run --session`. Regressions: `test_claude_newer_other_session_run_does_not_leak`, `test_claude_untagged_lens_run_still_satisfies`.
 
+**Remaining narrow trade-off:** untagged in-window runs are forgiven and remain the one cross-session vector (a concurrent Claude session’s untagged `lens_run` can satisfy this one). Tag runs (`append-run --session`) to close it fully. Cursor still requires a session tag — omit `--session` and a real review still blocks (by design; agent/CLI instructions hold that line).
+
 ## Remaining (not code bugs)
 
 ### I-1 residual — host contract
