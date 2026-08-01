@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Cursor afterFileEdit — record written path for stop-hook watch detection."""
+"""Cursor afterFileEdit — record written paths for stop-hook enforcement (F5.3)."""
 
 from __future__ import annotations
 
@@ -18,20 +18,38 @@ def main() -> int:
     try:
         payload = json.load(sys.stdin)
     except json.JSONDecodeError:
-        return 0
+        payload = {}
 
     file_path = payload.get("file_path") or payload.get("filePath")
-    session = (
-        payload.get("session_id")
-        or payload.get("sessionId")
-        or payload.get("conversation_id")
-        or "unknown"
-    )
+    # Prefer conversation_id for analysis / primary keying (I-3).
+    sessions = []
+    for key in ("conversation_id", "conversationId", "session_id", "sessionId"):
+        val = payload.get(key)
+        if val and str(val) not in sessions:
+            sessions.append(str(val))
+    if not sessions:
+        sessions = ["unknown"]
+
+    roots = payload.get("workspace_roots") or payload.get("workspaceRoots") or []
+    workspace_root = roots[0] if roots else payload.get("cwd")
+
+    # I-1 host contract: workspace root should be present for reliable enforcement.
+    if file_path and not workspace_root:
+        print(
+            "Lens afterFileEdit: no workspace_roots/cwd in payload; "
+            "enforcement may miss writes if stop uses a different conversation id "
+            "(see docs/ISSUES.md I-1).",
+            file=sys.stderr,
+        )
+
     if file_path:
-        try:
-            record_sidechannel_write(str(session), str(file_path))
-        except OSError:
-            pass
+        for session in sessions:
+            try:
+                record_sidechannel_write(
+                    session, str(file_path), workspace_root=workspace_root
+                )
+            except OSError:
+                pass
     print("{}")
     return 0
 

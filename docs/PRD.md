@@ -70,6 +70,8 @@ Agent Deck is context switching; a lens is judgment that must travel with that c
 - **Shapes the plugin step, worth arguing** — privacy: lenses encode work context; multi-laptop sync must stay private (private repo suffices? deck sync changes the answer).
 - **Blocks nothing yet** — team lenses: can a team share standards the way one person does, and who reviews the reviewer?
 
+Implementation residuals from Cursor hook regression work (session-id / workspace side-channel, relative hook cwd, live desktop E2E): see [`docs/ISSUES.md`](ISSUES.md).
+
 ---
 
 # Plugin PRD — multi-laptop, Claude Code + Cursor

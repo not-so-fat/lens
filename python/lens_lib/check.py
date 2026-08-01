@@ -11,7 +11,13 @@ from .config import Config, ConfigError, resolve_config
 from .log import append_record, has_lens_run_since
 from .paths import filter_watched
 from .transcript import gather_writes, session_id_from_transcript
-from .util import INVOCATION_TEMPLATE, session_writes_path, utc_now_iso
+from .util import (
+    INVOCATION_TEMPLATE,
+    conversation_workspace_writes_path,
+    session_writes_path,
+    utc_now_iso,
+    workspace_writes_path,
+)
 
 
 @dataclass
@@ -27,20 +33,33 @@ class CheckResult:
     watched_paths: List[str]
 
 
+def _real_ids(ids: List[str]) -> List[str]:
+    return [i for i in ids if i and i != "unknown"]
+
+
 def run_check(
     *,
     host: str,
     transcript_path: Optional[str] = None,
     session_id: Optional[str] = None,
+    session_ids: Optional[List[str]] = None,
     cwd: Optional[str] = None,
     config: Optional[Config] = None,
 ) -> CheckResult:
     """Evaluate whether this turn must invoke the lens runner before stopping."""
     started = time.perf_counter()
     cwd = cwd or os.getcwd()
-    session = session_id or (
+    ids: List[str] = []
+    for sid in session_ids or []:
+        if sid and str(sid) not in ids:
+            ids.append(str(sid))
+    if session_id and str(session_id) not in ids:
+        ids.insert(0, str(session_id))
+    session = ids[0] if ids else (
         session_id_from_transcript(transcript_path) if transcript_path else "unknown"
     )
+    if session and session not in ids:
+        ids.append(session)
 
     try:
         cfg = config or resolve_config()
@@ -59,8 +78,22 @@ def run_check(
             watched_paths=[],
         )
 
-    side = str(session_writes_path(session)) if session else None
-    written, first_ts = gather_writes(transcript_path, side)
+    side_paths: List[str] = [str(session_writes_path(sid)) for sid in ids if sid]
+    real = _real_ids(ids)
+    try:
+        if real:
+            # I-3: primary key (workspace, conversation/session id) — no workspace-wide merge
+            for sid in real:
+                side_paths.append(str(conversation_workspace_writes_path(cwd, sid)))
+        else:
+            # Fallback only when ids are missing / unknown
+            side_paths.append(str(workspace_writes_path(cwd)))
+    except OSError:
+        pass
+
+    written, first_ts = gather_writes(
+        transcript_path, sidechannel_paths=side_paths
+    )
     watched = filter_watched(written, cfg.watch_globs, cwd)
     watched_writes = len(watched) > 0
     lens_run_found = False
@@ -92,6 +125,7 @@ def run_check(
         "ts": utc_now_iso(),
         "event": "hook_check",
         "session": session,
+        "session_ids": ids,
         "watched_writes": watched_writes,
         "lens_run_found": lens_run_found,
         "blocked": should_block,
@@ -116,8 +150,30 @@ def run_check(
     )
 
 
-def record_sidechannel_write(session: str, file_path: str) -> None:
-    path = session_writes_path(session)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as f:
-        f.write(file_path + "\n")
+def record_sidechannel_write(
+    session: str,
+    file_path: str,
+    *,
+    workspace_root: Optional[str] = None,
+) -> None:
+    """
+    Record a write for later stop-hook gather.
+
+    Prefer (workspace, conversation_id). Workspace-wide fallback only when
+    session is missing/unknown (I-3).
+    """
+    targets = [session_writes_path(session)]
+    if workspace_root:
+        try:
+            if session and session != "unknown":
+                targets.append(
+                    conversation_workspace_writes_path(workspace_root, session)
+                )
+            else:
+                targets.append(workspace_writes_path(workspace_root))
+        except OSError:
+            pass
+    for path in targets:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as f:
+            f.write(file_path + "\n")

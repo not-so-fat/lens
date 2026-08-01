@@ -108,6 +108,7 @@ def load_sidechannel_writes(writes_file: str) -> List[str]:
 def gather_writes(
     transcript_path: Optional[str],
     sidechannel_path: Optional[str] = None,
+    sidechannel_paths: Optional[List[str]] = None,
 ) -> Tuple[List[str], Optional[str]]:
     """Return (written_paths, first_event_ts)."""
     paths: Set[str] = set()
@@ -115,6 +116,15 @@ def gather_writes(
     if transcript_path:
         paths.update(written_paths_from_transcript(transcript_path))
         first_ts = first_event_ts(transcript_path)
+    extras: List[str] = []
+    if sidechannel_paths:
+        extras.extend(sidechannel_paths)
     if sidechannel_path:
-        paths.update(load_sidechannel_writes(sidechannel_path))
+        extras.append(sidechannel_path)
+    seen_files: Set[str] = set()
+    for sc in extras:
+        if not sc or sc in seen_files:
+            continue
+        seen_files.add(sc)
+        paths.update(load_sidechannel_writes(sc))
     return sorted(paths), first_ts

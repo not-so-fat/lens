@@ -53,44 +53,138 @@ def _plugin_root() -> Optional[Path]:
     return None
 
 
+def _iter_command_strings(obj) -> List[str]:
+    found: List[str] = []
+    if isinstance(obj, dict):
+        cmd = obj.get("command")
+        if isinstance(cmd, str):
+            found.append(cmd)
+        for v in obj.values():
+            found.extend(_iter_command_strings(v))
+    elif isinstance(obj, list):
+        for item in obj:
+            found.extend(_iter_command_strings(item))
+    return found
+
+
+def _validate_hook_commands(
+    *,
+    host: str,
+    hooks_file: Path,
+    plugin_root: Path,
+    required_var: str,
+    required_scripts: List[str],
+) -> tuple[bool, str]:
+    """Fail if commands use relative ./ paths or don't expand to real scripts."""
+    try:
+        data = json.loads(hooks_file.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        return False, f"invalid {hooks_file.name}: {e}"
+
+    commands = _iter_command_strings(data)
+    if not commands:
+        return False, f"no command entries in {hooks_file}"
+
+    root_s = str(plugin_root)
+    problems: List[str] = []
+    for cmd in commands:
+        if "./" in cmd and required_var not in cmd:
+            problems.append(f"relative path without {required_var}: {cmd}")
+        if required_var not in cmd:
+            problems.append(f"missing {required_var}: {cmd}")
+        expanded = (
+            cmd.replace("${" + required_var + "}", root_s)
+            .replace("$" + required_var, root_s)
+        )
+        # crude extract of .py path tokens
+        for token in expanded.replace('"', "").split():
+            if token.endswith(".py"):
+                p = Path(token)
+                if not p.is_file():
+                    problems.append(f"script missing after expand: {token}")
+
+    for rel in required_scripts:
+        target = plugin_root / rel
+        if not target.is_file():
+            problems.append(f"expected script missing: {target}")
+
+    if problems:
+        return False, f"{host}: " + "; ".join(problems)
+    return True, f"{host}: {hooks_file} commands use {required_var} and scripts exist"
+
+
 def _hooks_registered_claude(plugin_root: Optional[Path]) -> tuple[bool, str]:
     if plugin_root:
         hooks = plugin_root / "hooks" / "claude-hooks.json"
-        if hooks.is_file():
-            try:
-                data = json.loads(hooks.read_text(encoding="utf-8"))
-                stop = (data.get("hooks") or {}).get("Stop")
-                if stop:
-                    return True, f"plugin hooks present: {hooks}"
-            except json.JSONDecodeError as e:
-                return False, f"invalid claude-hooks.json: {e}"
-        return False, f"missing {hooks}"
+        if not hooks.is_file():
+            return False, f"missing {hooks}"
+        return _validate_hook_commands(
+            host="claude",
+            hooks_file=hooks,
+            plugin_root=plugin_root,
+            required_var="CLAUDE_PLUGIN_ROOT",
+            required_scripts=["python/claude_stop.py"],
+        )
     marketplaces = claude_home() / "plugins" / "marketplaces"
     if marketplaces.is_dir():
         for p in marketplaces.rglob("claude-hooks.json"):
-            return True, f"found {p}"
+            root = p.parents[1] if p.parent.name == "hooks" else p.parent
+            return _validate_hook_commands(
+                host="claude",
+                hooks_file=p,
+                plugin_root=root,
+                required_var="CLAUDE_PLUGIN_ROOT",
+                required_scripts=["python/claude_stop.py"],
+            )
     return False, "Claude hooks not found (install lens plugin)"
 
 
 def _hooks_registered_cursor(plugin_root: Optional[Path]) -> tuple[bool, str]:
     if plugin_root:
         hooks = plugin_root / "hooks" / "cursor-hooks.json"
-        if hooks.is_file():
-            try:
-                data = json.loads(hooks.read_text(encoding="utf-8"))
-                root = data.get("hooks") if isinstance(data.get("hooks"), dict) else data
-                if root.get("stop"):
-                    return True, f"plugin hooks present: {hooks}"
-            except json.JSONDecodeError as e:
-                return False, f"invalid cursor-hooks.json: {e}"
-        return False, f"missing {hooks}"
+        if not hooks.is_file():
+            return False, f"missing {hooks}"
+        return _validate_hook_commands(
+            host="cursor",
+            hooks_file=hooks,
+            plugin_root=plugin_root,
+            required_var="CURSOR_PLUGIN_ROOT",
+            required_scripts=[
+                "python/cursor_stop.py",
+                "python/cursor_after_file_edit.py",
+            ],
+        )
+    # Installed plugins under ~/.cursor/plugins (cache / local)
+    plugins_root = cursor_home() / "plugins"
+    if plugins_root.is_dir():
+        for p in plugins_root.rglob("cursor-hooks.json"):
+            if "lens" not in str(p).lower():
+                continue
+            root = p.parents[1] if p.parent.name == "hooks" else p.parent
+            return _validate_hook_commands(
+                host="cursor",
+                hooks_file=p,
+                plugin_root=root,
+                required_var="CURSOR_PLUGIN_ROOT",
+                required_scripts=[
+                    "python/cursor_stop.py",
+                    "python/cursor_after_file_edit.py",
+                ],
+            )
     user_hooks = cursor_home() / "hooks.json"
     if user_hooks.is_file():
         try:
             data = json.loads(user_hooks.read_text(encoding="utf-8"))
             hooks = data.get("hooks") or data
             if hooks.get("stop"):
-                return True, f"user hooks.json has stop: {user_hooks}"
+                cmds = _iter_command_strings(hooks.get("stop"))
+                if any("CURSOR_PLUGIN_ROOT" in c or "lens" in c for c in cmds):
+                    return True, f"user hooks.json has lens stop: {user_hooks}"
+                return (
+                    False,
+                    f"{user_hooks} has stop but no CURSOR_PLUGIN_ROOT/lens command — "
+                    "import the lens plugin (do not rely on workspace-relative ./python)",
+                )
         except json.JSONDecodeError:
             pass
     return False, "Cursor stop hook not found (import lens plugin / Team Marketplace)"
