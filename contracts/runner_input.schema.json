@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "runner_input.schema.json",
+  "type": "object",
+  "required": ["round", "deliverable"],
+  "properties": {
+    "lens": {
+      "type": "string",
+      "description": "configured lens name; defaults to config default_lens"
+    },
+    "round": { "type": "integer", "minimum": 1 },
+    "deliverable": { "type": "string", "description": "stable key; identical across rounds" },
+    "files": { "type": "array", "items": { "type": "string" } },
+    "sources": { "type": "array", "items": { "type": "string" } },
+    "prior_findings": {
+      "type": "array",
+      "items": { "$ref": "lens_run.schema.json#/properties/findings/items" }
+    }
+  },
+  "additionalProperties": false
+}

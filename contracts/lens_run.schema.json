@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lens_run.schema.json",
+  "type": "object",
+  "required": ["ts", "event", "lens", "deliverable", "rounds", "verdict", "findings", "escalations"],
+  "properties": {
+    "ts": { "type": "string", "format": "date-time" },
+    "event": { "const": "lens_run" },
+    "lens": {
+      "type": "string",
+      "description": "configured lens name used for this run"
+    },
+    "deliverable": { "type": "string", "minLength": 1 },
+    "rounds": { "type": "integer", "minimum": 1 },
+    "verdict": {
+      "enum": ["pass", "escalated"],
+      "description": "both terminal verdicts satisfy the Stop/stop enforcement gate"
+    },
+    "host": {
+      "enum": ["claude-code", "cursor"],
+      "description": "absent in records written before Cursor support = claude-code"
+    },
+    "session": {
+      "type": "string",
+      "description": "conversation/session id; required for reliable Cursor gate when no transcript window"
+    },
+    "session_ids": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "optional aliases (session_id + conversation_id) for the same chat"
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["round", "check", "target", "severity", "reaction"],
+        "properties": {
+          "round": { "type": "integer", "minimum": 1 },
+          "check": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
+          "target": { "type": "string" },
+          "severity": { "enum": ["FIX", "ESCALATE"] },
+          "reaction": { "enum": ["fixed", "fixed-class", "disputed", "escalated"] },
+          "note": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "escalations": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,17 @@
+.temporal/
+.omc/
+.DS_Store
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+.agent-deck/
+.cursor/rules/agent-deck-stubs/
+.claude/skills/agent-deck-*/
+.claude/skills/agent-deck-*
+*.local.md
+.lens-session/
+tmp*/
+.tmpdir*/
