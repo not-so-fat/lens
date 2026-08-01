@@ -40,8 +40,8 @@ def session_writes_path(session: str) -> Path:
 
 INVOCATION_TEMPLATE = (
     "Invoke the `lens` agent with: "
+    "lens=<configured name, or omit for default_lens>, "
     "round=<n>, deliverable=\"<stable key>\", files=[...], sources=[...], "
-    "optional lens_path=<absolute .md override>, "
     "and on rounds after the first: prior_findings + your reaction per finding. "
     "Reuse the same deliverable key every round."
 )

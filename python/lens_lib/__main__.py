@@ -1,4 +1,4 @@
-"""CLI: python -m lens_lib <doctor|close|append-run|record-write>"""
+"""CLI: python -m lens_lib <doctor|close|append-run|record-write|lens>"""
 
 from __future__ import annotations
 
@@ -18,8 +18,9 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
     report = run_doctor(
         fix_sandbox=not args.no_fix_sandbox,
-        write_lens=args.write_lens,
         write_log=args.write_log,
+        write_lens_name=args.write_lens_name,
+        write_lens_path=args.write_lens_path,
     )
     return print_report(report)
 
@@ -72,13 +73,53 @@ def cmd_record_write(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_lens_list(_: argparse.Namespace) -> int:
+    from .config import ConfigError, list_lens_names, resolve_config, resolve_lens
+
+    try:
+        cfg = resolve_config()
+        for name in list_lens_names(cfg):
+            _, path = resolve_lens(cfg, name)
+            mark = "*" if name == cfg.default_lens else " "
+            print(f"{mark} {name}\t{path}")
+    except ConfigError as e:
+        print(f"lens: {e}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def cmd_lens_add(args: argparse.Namespace) -> int:
+    from .config import ConfigError, add_lens
+
+    try:
+        path = add_lens(args.name, args.path, make_default=args.default)
+        print(f"added {args.name} → {args.path} ({path})")
+    except ConfigError as e:
+        print(f"lens: {e}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def cmd_lens_remove(args: argparse.Namespace) -> int:
+    from .config import ConfigError, remove_lens
+
+    try:
+        path = remove_lens(args.name)
+        print(f"removed {args.name} ({path})")
+    except ConfigError as e:
+        print(f"lens: {e}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(prog="lens_lib")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p_doc = sub.add_parser("doctor", help="validate lens install")
-    p_doc.add_argument("--write-lens", metavar="PATH", help="with --write-log, write config")
-    p_doc.add_argument("--write-log", metavar="PATH", help="with --write-lens, write config")
+    p_doc.add_argument("--write-log", metavar="PATH")
+    p_doc.add_argument("--write-lens-name", metavar="NAME")
+    p_doc.add_argument("--write-lens-path", metavar="PATH")
     p_doc.add_argument("--no-fix-sandbox", action="store_true")
     p_doc.set_defaults(func=cmd_doctor)
 
@@ -98,6 +139,19 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_rw.add_argument("--session", required=True)
     p_rw.add_argument("--file-path", required=True)
     p_rw.set_defaults(func=cmd_record_write)
+
+    p_lens = sub.add_parser("lens", help="manage named lenses")
+    lens_sub = p_lens.add_subparsers(dest="lens_cmd", required=True)
+    p_list = lens_sub.add_parser("list", help="list configured lenses")
+    p_list.set_defaults(func=cmd_lens_list)
+    p_add = lens_sub.add_parser("add", help="register a named lens path")
+    p_add.add_argument("name")
+    p_add.add_argument("path")
+    p_add.add_argument("--default", action="store_true")
+    p_add.set_defaults(func=cmd_lens_add)
+    p_rm = lens_sub.add_parser("remove", help="unregister a named lens")
+    p_rm.add_argument("name")
+    p_rm.set_defaults(func=cmd_lens_remove)
 
     args = parser.parse_args(argv)
     return args.func(args)

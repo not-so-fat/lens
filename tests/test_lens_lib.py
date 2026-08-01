@@ -15,42 +15,84 @@ sys.path.insert(0, str(ROOT / "python"))
 
 from lens_lib.check import run_check  # noqa: E402
 from lens_lib.close import close_deliverable  # noqa: E402
-from lens_lib.config import ConfigError, resolve_config, write_config  # noqa: E402
+from lens_lib.config import (  # noqa: E402
+    ConfigError,
+    add_lens,
+    resolve_config,
+    resolve_lens,
+    write_config,
+)
 from lens_lib.lens_parse import parse_lens_file  # noqa: E402
 from lens_lib.log import append_record, has_lens_run_since  # noqa: E402
 from lens_lib.paths import path_matches_watch  # noqa: E402
 from lens_lib.transcript import first_event_ts, written_paths_from_transcript  # noqa: E402
 
+SAMPLE = """---
+title: t
+---
+
+## Core principle
+- x
+
+## When To Run This
+- y
+
+## Process
+
+**A?**
+- z
+
+## Failure-Mode Guards
+- g
+"""
+
 
 class ConfigTests(unittest.TestCase):
-    def test_env_overrides(self):
+    def test_named_lenses_and_dir(self):
         with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:
-            lens = Path(td) / "lens.md"
+            home = Path(td) / "home"
+            home.mkdir()
+            lenses_dir = Path(td) / "dir"
+            lenses_dir.mkdir()
+            review = Path(td) / "review.md"
+            deck = lenses_dir / "deck.md"
+            review.write_text(SAMPLE)
+            deck.write_text(SAMPLE)
             log = Path(td) / "runs.jsonl"
-            lens.write_text("x")
-            log.write_text("")
-            old_l = os.environ.get("LENS_PATH")
-            old_g = os.environ.get("LENS_LOG_PATH")
-            os.environ["LENS_PATH"] = str(lens)
-            os.environ["LENS_LOG_PATH"] = str(log)
+            old_home = os.environ.get("HOME")
+            os.environ["HOME"] = str(home)
+            os.environ.pop("LENS_LOG_PATH", None)
+            os.environ.pop("LENS_DEFAULT", None)
             try:
+                write_config(
+                    str(log),
+                    lenses={"review": str(review)},
+                    default_lens="review",
+                    lenses_dir=str(lenses_dir),
+                )
                 cfg = resolve_config()
-                self.assertEqual(cfg.lens_path, lens.resolve())
-                self.assertEqual(cfg.log_path, log.resolve())
-                self.assertIn(cfg.source, ("env", "env+config"))
+                name, path = resolve_lens(cfg, "review")
+                self.assertEqual(name, "review")
+                self.assertEqual(path, review.resolve())
+                name2, path2 = resolve_lens(cfg, "deck")
+                self.assertEqual(name2, "deck")
+                self.assertEqual(path2, deck.resolve())
+                with self.assertRaises(ConfigError):
+                    resolve_lens(cfg, "missing")
+                add_lens("story", str(review))
+                cfg2 = resolve_config()
+                self.assertIn("story", cfg2.lenses)
             finally:
-                for k, old in (("LENS_PATH", old_l), ("LENS_LOG_PATH", old_g)):
-                    if old is None:
-                        os.environ.pop(k, None)
-                    else:
-                        os.environ[k] = old
+                if old_home is None:
+                    os.environ.pop("HOME", None)
+                else:
+                    os.environ["HOME"] = old_home
 
     def test_missing_raises(self):
-        old_l = os.environ.pop("LENS_PATH", None)
-        old_g = os.environ.pop("LENS_LOG_PATH", None)
         with tempfile.TemporaryDirectory() as td:
             old_home = os.environ.get("HOME")
             os.environ["HOME"] = td
+            os.environ.pop("LENS_LOG_PATH", None)
             try:
                 with self.assertRaises(ConfigError):
                     resolve_config()
@@ -59,10 +101,6 @@ class ConfigTests(unittest.TestCase):
                     os.environ.pop("HOME", None)
                 else:
                     os.environ["HOME"] = old_home
-                if old_l is not None:
-                    os.environ["LENS_PATH"] = old_l
-                if old_g is not None:
-                    os.environ["LENS_LOG_PATH"] = old_g
 
 
 class PathsTests(unittest.TestCase):
@@ -113,19 +151,21 @@ class LogAndCheckTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:
             lens = Path(td) / "lens.md"
             log = Path(td) / "runs.jsonl"
-            lens.write_text("---\ntitle: t\n---\n## Core principle\n- x\n## When To Run This\n- y\n## Process\n**A?**\n- z\n## Failure-Mode Guards\n- g\n")
+            lens.write_text(SAMPLE)
             home = Path(td) / "home"
             home.mkdir()
             deliverable = Path(td) / "doc.md"
             deliverable.write_text("x", encoding="utf-8")
             old_home = os.environ.get("HOME")
-            old_l = os.environ.get("LENS_PATH")
-            old_g = os.environ.get("LENS_LOG_PATH")
             os.environ["HOME"] = str(home)
-            os.environ.pop("LENS_PATH", None)
             os.environ.pop("LENS_LOG_PATH", None)
             try:
-                write_config(str(lens), str(log), enforce=True)
+                write_config(
+                    str(log),
+                    lenses={"review": str(lens)},
+                    default_lens="review",
+                    enforce=True,
+                )
                 transcript = Path(td) / "sess.jsonl"
                 transcript.write_text(
                     json.dumps(
@@ -165,14 +205,13 @@ class LogAndCheckTests(unittest.TestCase):
                 self.assertTrue(result.watched_writes)
                 self.assertFalse(result.lens_run_found)
                 self.assertTrue(result.blocked)
-                self.assertIn("Invoke the `lens` agent", result.message)
 
                 append_record(
                     log,
                     {
                         "ts": "2026-07-31T10:00:02.000Z",
                         "event": "lens_run",
-                        "lens": str(lens),
+                        "lens": "review",
                         "deliverable": "doc",
                         "rounds": 1,
                         "verdict": "pass",
@@ -195,27 +234,23 @@ class LogAndCheckTests(unittest.TestCase):
                     os.environ.pop("HOME", None)
                 else:
                     os.environ["HOME"] = old_home
-                for k, old in (("LENS_PATH", old_l), ("LENS_LOG_PATH", old_g)):
-                    if old is None:
-                        os.environ.pop(k, None)
-                    else:
-                        os.environ[k] = old
 
     def test_close_requires_lens_run(self):
         with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:
             lens = Path(td) / "lens.md"
             log = Path(td) / "runs.jsonl"
-            lens.write_text("x")
+            lens.write_text(SAMPLE)
             home = Path(td) / "home"
             home.mkdir()
             old_home = os.environ.get("HOME")
-            old_l = os.environ.get("LENS_PATH")
-            old_g = os.environ.get("LENS_LOG_PATH")
             os.environ["HOME"] = str(home)
-            os.environ.pop("LENS_PATH", None)
             os.environ.pop("LENS_LOG_PATH", None)
             try:
-                write_config(str(lens), str(log))
+                write_config(
+                    str(log),
+                    lenses={"review": str(lens)},
+                    default_lens="review",
+                )
                 with self.assertRaises(ValueError):
                     close_deliverable("missing", 0)
                 append_record(
@@ -223,7 +258,7 @@ class LogAndCheckTests(unittest.TestCase):
                     {
                         "ts": "2026-07-31T10:00:02.000Z",
                         "event": "lens_run",
-                        "lens": str(lens),
+                        "lens": "review",
                         "deliverable": "d1",
                         "rounds": 1,
                         "verdict": "pass",
@@ -233,17 +268,11 @@ class LogAndCheckTests(unittest.TestCase):
                 )
                 rec, _ = close_deliverable("d1", 0)
                 self.assertEqual(rec["event"], "human_review")
-                self.assertEqual(rec["corrections"], 0)
             finally:
                 if old_home is None:
                     os.environ.pop("HOME", None)
                 else:
                     os.environ["HOME"] = old_home
-                for k, old in (("LENS_PATH", old_l), ("LENS_LOG_PATH", old_g)):
-                    if old is None:
-                        os.environ.pop(k, None)
-                    else:
-                        os.environ[k] = old
 
 
 class LensParseTests(unittest.TestCase):

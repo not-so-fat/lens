@@ -8,7 +8,7 @@
     "event": { "const": "lens_run" },
     "lens": {
       "type": "string",
-      "description": "absolute lens file path (or stable stem) used for this run"
+      "description": "configured lens name used for this run"
     },
     "deliverable": { "type": "string", "minLength": 1 },
     "rounds": { "type": "integer", "minimum": 1 },

@@ -8,15 +8,21 @@ Canonical product + implementation spec: [`docs/PRD.md`](docs/PRD.md).
 
 - macOS
 - Python 3 (stdlib only — no pip install)
-- A lens markdown file (any path) and a writable path for the run log
+- One or more lens markdown files and a writable path for the run log
 
-## Configure (both hosts)
+## Configure
+
+Register named lenses (once, or gradually):
 
 ```bash
 mkdir -p ~/.lens
 cat > ~/.lens/config.json <<'EOF'
 {
-  "lens_path": "/absolute/path/to/your-lens.md",
+  "lenses": {
+    "review": "/absolute/path/to/review.md",
+    "deck": "/absolute/path/to/deck.md"
+  },
+  "default_lens": "review",
   "log_path": "/absolute/path/to/lens_runs.jsonl",
   "enforce": true,
   "watch_globs": ["**/*.md", "**/*.html", "**/*.pptx"]
@@ -24,7 +30,16 @@ cat > ~/.lens/config.json <<'EOF'
 EOF
 ```
 
-Session overrides: `export LENS_PATH=...` and `export LENS_LOG_PATH=...` (both required when using env).
+Add another later:
+
+```bash
+PYTHONPATH=python python3 -m lens_lib lens add story /absolute/path/to/story.md
+PYTHONPATH=python python3 -m lens_lib lens list
+```
+
+Optional `lenses_dir`: drop `<name>.md` into a folder and invoke with that name (no map entry required).
+
+Env: `LENS_LOG_PATH`, `LENS_DEFAULT` (default lens name).
 
 ## Install — Claude Code
 
@@ -37,23 +52,19 @@ New session should list the `lens` agent. Run `/lens-doctor`.
 
 ## Install — Cursor (desktop IDE)
 
-Private repo: add this GitHub repo as a **Team Marketplace** (Dashboard → Settings → Plugins), or import/load the local clone as a plugin. Public Cursor Marketplace submission is out of scope.
-
-Then run `/lens-doctor`. Doctor merges the lens file's parent directory into `~/.cursor/sandbox.json` `additionalReadonlyPaths`.
-
-Cursor CLI hook delivery is excluded (§10 of the PRD).
+Import this repo as a Team Marketplace / local plugin, then `/lens-doctor`. Doctor merges lens file directories into `~/.cursor/sandbox.json` `additionalReadonlyPaths`.
 
 ## Usage
 
-Worker agents invoke the `lens` subagent with:
+Tell the worker the **lens name**:
 
-- `round`, `deliverable` (stable key)
-- `files` / `sources`, optional `lens_path` override
-- on later rounds: `prior_findings` + reactions
+```text
+Run the lens loop with lens=deck on these files …
+```
 
-On a terminal round the runner appends one `lens_run` line to `log_path`.
+The runner resolves `deck` → configured path. Omit `lens` to use `default_lens`.
 
-After your human review:
+On a terminal round it appends one `lens_run` (field `lens` = name) to `log_path`.
 
 ```text
 /lens-close "my-deliverable-key" corrections=0
@@ -64,13 +75,3 @@ After your human review:
 ```text
 /lens-doctor
 ```
-
-Or write config in one step:
-
-```bash
-PYTHONPATH=python python3 -m lens_lib doctor \
-  --write-lens /absolute/path/to/your-lens.md \
-  --write-log /absolute/path/to/lens_runs.jsonl
-```
-
-Checks: config, lens file shape, log writable, host hooks, Cursor sandbox path.

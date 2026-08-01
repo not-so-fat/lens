@@ -7,7 +7,7 @@ Personal review standards for AI agents — Claude Code plugin + Cursor plugin i
 1. Read [`docs/PRD.md`](docs/PRD.md) — product framing + implementation contracts (canonical).
 2. Schemas live in [`contracts/`](contracts/) — copy shapes from the PRD; do not invent fields.
 3. Python under [`python/`](python/) is **stdlib only** (F1.3). No network calls in the plugin release.
-4. Config is filepath-based: `lens_path` + `log_path` (no vault / area concepts).
+4. Config is named lenses (`lenses` map / optional `lenses_dir`) + `log_path` (no vault / area concepts).
 5. Implement / verify by F-number acceptance boxes in the PRD. §10 is a hard stop-list.
 
 ## Layout

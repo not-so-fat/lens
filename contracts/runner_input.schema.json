@@ -4,9 +4,9 @@
   "type": "object",
   "required": ["round", "deliverable"],
   "properties": {
-    "lens_path": {
+    "lens": {
       "type": "string",
-      "description": "optional absolute path override; default is config lens_path"
+      "description": "configured lens name; defaults to config default_lens"
     },
     "round": { "type": "integer", "minimum": 1 },
     "deliverable": { "type": "string", "description": "stable key; identical across rounds" },

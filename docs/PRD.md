@@ -6,7 +6,7 @@ status: refining
 
 # Lens — personal review standards for AI agents (product idea + plugin PRD)
 
-> **Canonical home:** this file lives in the `lens` plugin repo (`docs/PRD.md`). Implementation note (2026-08-01): Cursor support uses the native `.cursor-plugin/` marketplace (Team Marketplace / local import), not a hand-merge into `~/.cursor/`; F5.3’s install-script wording is superseded. Doctor still merges the lens file's parent directory into `~/.cursor/sandbox.json` `additionalReadonlyPaths`.
+> **Canonical home:** this file lives in the `lens` plugin repo (`docs/PRD.md`). Implementation note (2026-08-01): Cursor support uses the native `.cursor-plugin/` marketplace (Team Marketplace / local import), not a hand-merge into `~/.cursor/`; F5.3’s install-script wording is superseded. Doctor still merges configured lens directories into `~/.cursor/sandbox.json` `additionalReadonlyPaths`.
 
 > **One-line:** professionals working with AI agents spend their review time on issues that are simple *for them*; a lens — their review standards as a runnable, versioned file — lets agents resolve those issues among themselves before human review, and turns every correction into a permanent standard instead of a repeated conversation.
 
@@ -102,13 +102,13 @@ Deferred roles (team members, Codex host): see §10.
 Acceptance:
 - [ ] `claude plugin marketplace add <private-repo>` + `claude plugin install lens` succeeds on a clean machine with repo access
 - [ ] a new session lists the `lens` agent
-- [ ] `/lens-doctor` exits green after writing `~/.lens/config.json` with valid `lens_path` and `log_path`
+- [ ] `/lens-doctor` exits green after writing `~/.lens/config.json` with named `lenses` (or `lenses_dir`), `default_lens`, and `log_path`
 
-**US-2 (plugin). Run the loop.** As a worker agent, I want to invoke the runner with (round, deliverable key, files, prior findings, optional lens_path) and get a verdict so simple issues resolve without the human.
+**US-2 (plugin). Run the loop.** As a worker agent, I want to invoke the runner with (lens name, round, deliverable key, files, prior findings) and get a verdict so simple issues resolve without the human.
 Acceptance:
 - [ ] runner reply contains verdict `PASS`/`FIX`/`ESCALATE` and findings matching §7.3 output shape
 - [ ] every finding cites a `check` slug from the lens vocabulary (F2.3)
-- [ ] with `lens_path` unreachable, runner replies `LENS UNAVAILABLE: <path>` and produces no findings
+- [ ] with an unknown lens name or unreadable lens file, runner replies `LENS UNAVAILABLE: <path>` and produces no findings
 
 **US-3 (plugin). Enforcement.** As a lens owner, I want a turn that wrote watched files blocked at its Stop-hook firing until a lens run is logged, so the loop cannot be silently skipped.
 Acceptance:
@@ -132,7 +132,7 @@ Acceptance:
 - [ ] install script registers the Cursor lens subagent (`~/.cursor/agents/`) and merges the `stop` hook into `~/.cursor/hooks.json`; `/lens-doctor` validates both (F5.3)
 - [ ] the Cursor subagent reviews per §7.3 and logs per §7.1 with `host: "cursor"`
 - [ ] the Cursor `stop` hook returns `followup_message` when watched writes lack a session `lens_run` (bounded by `loop_limit`; F5.2) and appends `hook_check` with `host: "cursor"`
-- [ ] the lens file is readable from the Cursor sandbox (`sandbox.json` `additionalReadonlyPaths` for its parent dir; F5.3)
+- [ ] configured lens directories are readable from the Cursor sandbox (`sandbox.json` `additionalReadonlyPaths`; F5.3)
 
 Deferred stories (deck card fetch, Codex host, correction-capture automation): see §10.
 
@@ -143,7 +143,7 @@ Deferred stories (deck card fetch, Codex host, correction-capture automation): s
 | Req | Requirement | Acceptance |
 | --- | --- | --- |
 | F1.1 | Private git repo is a Claude Code plugin marketplace: `.claude-plugin/marketplace.json` + plugin `lens` with `agents/`, `hooks/`, `commands/` | US-1 install steps pass on macOS |
-| F1.2 | Config resolves env `LENS_PATH`+`LENS_LOG_PATH` → `~/.lens/config.json` (§7.4) → error with setup instructions | `/lens-doctor` reports the resolved source |
+| F1.2 | Config resolves `~/.lens/config.json` (env `LENS_LOG_PATH` / `LENS_DEFAULT` overrides) → error with setup instructions | `/lens-doctor` reports the resolved source |
 | F1.3 | All hook/command scripts are Python 3 stdlib-only | `grep`-verifiable: no third-party imports |
 
 ### F2 — Runner agent
@@ -151,7 +151,7 @@ Deferred stories (deck card fetch, Codex host, correction-capture automation): s
 | Req | Requirement | Acceptance |
 | --- | --- | --- |
 | F2.1 | Plugin ships the runner as `agents/lens.md`, semantics identical to the proven v0 agent, with hard-coded paths replaced by config resolution (F1.2) | US-2 acceptance; diff vs v0 shows only path/config changes |
-| F2.2 | Runner reads `lens_path` (or worker override) at invocation time; lens file is the single source of truth (input shape §7.5) | editing the lens changes the next run's checks with no plugin change |
+| F2.2 | Runner resolves lens **name** → file path at invocation time; lens file is the single source of truth (input shape §7.5) | editing the lens changes the next run's checks with no plugin change |
 | F2.3 | The canonical per-lens slug list lives in the runner agent file (the vocabulary's home in the plugin release); a new slug is minted only when a finding fires on a check with no slug in the list — whether newly added to the lens or previously uncovered — after grepping the run log for an existing one | no two slugs for one lens question across the pilot log |
 | F2.4 | Terminal-round logging per §7.1; non-terminal rounds never log | US-4 acceptance |
 
@@ -204,7 +204,7 @@ All schemas are JSON Schema Draft 2020-12. Contracts directory in the plugin rep
   "properties": {
     "ts": { "type": "string", "format": "date-time" },
     "event": { "const": "lens_run" },
-    "lens": { "type": "string", "description": "absolute lens file path used for this run" },
+    "lens": { "type": "string", "description": "configured lens name used for this run" },
     "deliverable": { "type": "string", "minLength": 1 },
     "rounds": { "type": "integer", "minimum": 1 },
     "verdict": { "enum": ["pass", "escalated"] },
@@ -273,7 +273,7 @@ Input:
   "type": "object",
   "required": ["round", "deliverable"],
   "properties": {
-    "lens_path": { "type": "string", "description": "optional absolute path override; default is config lens_path" },
+    "lens": { "type": "string", "description": "configured lens name; defaults to config default_lens" },
     "round": { "type": "integer", "minimum": 1 },
     "deliverable": { "type": "string", "description": "stable key; identical across rounds" },
     "files": { "type": "array", "items": { "type": "string" } },
@@ -296,9 +296,11 @@ Output: verdict `PASS | FIX | ESCALATE`; findings and escalations exactly as the
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "config.schema.json",
   "type": "object",
-  "required": ["lens_path", "log_path"],
+  "required": ["log_path", "default_lens"],
   "properties": {
-    "lens_path": { "type": "string", "description": "absolute path to the lens markdown file" },
+    "lenses": { "type": "object", "additionalProperties": { "type": "string" }, "description": "name → absolute .md path" },
+    "lenses_dir": { "type": "string", "description": "optional; unresolved names map to <dir>/<name>.md" },
+    "default_lens": { "type": "string", "description": "name used when the worker omits lens" },
     "log_path": { "type": "string", "description": "absolute path to the append-only lens_runs.jsonl file" },
     "enforce": { "type": "boolean", "default": true },
     "watch_globs": {
@@ -314,7 +316,7 @@ Output: verdict `PASS | FIX | ESCALATE`; findings and escalations exactly as the
 
 ### 7.5 Lens file input shape (opinionated — the runner never infers)
 
-A lens is a markdown file at an absolute path (`lens_path`). Required, in this order: YAML frontmatter; `## Core principle`; `## When To Run This`; `## Process` — free prose or numbered prelude steps allowed, then one or more bold `**<Check block>?**` question blocks of bullet checks, optionally a closing `Finish:` line; `## Failure-Mode Guards`. Additional sections (an H1 title, `## Stable priors`, …) are allowed and ignored by validation. Every slug maps to exactly one Process bullet, but not every bullet carries a slug; a finding that fires on an uncovered check mints one per F2.3. The canonical slug list lives in the runner agent file (F2.3). A file missing `## Process` or containing no check block fails `/lens-doctor` (F4.3) and the runner declines it at invocation. Shape verified against any file matching this structure (see `tests/fixtures/sample_lens.md`).
+A lens is a markdown file resolved from a configured name (`lenses` map or `lenses_dir/<name>.md`). Required, in this order: YAML frontmatter; `## Core principle`; `## When To Run This`; `## Process` — free prose or numbered prelude steps allowed, then one or more bold `**<Check block>?**` question blocks of bullet checks, optionally a closing `Finish:` line; `## Failure-Mode Guards`. Additional sections (an H1 title, `## Stable priors`, …) are allowed and ignored by validation. Every slug maps to exactly one Process bullet, but not every bullet carries a slug; a finding that fires on an uncovered check mints one per F2.3. The canonical slug list lives in the runner agent file (F2.3). A file missing `## Process` or containing no check block fails `/lens-doctor` (F4.3) and the runner declines it at invocation. Shape verified against any file matching this structure (see `tests/fixtures/sample_lens.md`).
 
 ### 7.6 `hook_check` record (appended by the Stop hook, F3.4)
 
@@ -384,7 +386,7 @@ Owner for all milestones: lens owner (side project).
 
 | Question | Default if undecided | Owner |
 | --- | --- | --- |
-| Multiple lenses on one machine? | plugin release: one `lens_path` + `log_path`; override via `LENS_PATH`/`LENS_LOG_PATH` | lens owner |
+| Multiple lenses on one machine? | plugin release: named `lenses` map and/or `lenses_dir`; one shared `log_path` | lens owner |
 | Does the hook watch code files too? | plugin release: no — `watch_globs` defaults target documents; code review stays with existing tools | lens owner |
 | Cursor install scope? | user-level (`~/.cursor/`), not per-project — standards are personal, not per-repo | lens owner |
 

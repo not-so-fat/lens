@@ -1,23 +1,23 @@
 ---
 name: lens-doctor
-description: Validate Lens config, lens file shape, run log, and host hooks. Fixes Cursor sandbox readonly path for the lens file directory.
+description: Validate Lens config, named lenses, run log, and host hooks. Fixes Cursor sandbox readonly paths for lens directories.
 ---
 
 Run the Lens doctor against this machine.
-
-1. Resolve the plugin root (repo or `$CLAUDE_PLUGIN_ROOT` / Cursor plugin path).
-2. Execute:
 
 ```bash
 PYTHONPATH="<plugin-root>/python" python3 -m lens_lib doctor
 ```
 
-Optional: write config in one step:
+Bootstrap config with one named lens:
 
 ```bash
 PYTHONPATH="<plugin-root>/python" python3 -m lens_lib doctor \
-  --write-lens "/absolute/path/to/your-lens.md" \
-  --write-log "/absolute/path/to/lens_runs.jsonl"
+  --write-log "/absolute/path/to/lens_runs.jsonl" \
+  --write-lens-name "review" \
+  --write-lens-path "/absolute/path/to/review.md"
 ```
 
-Report every `[PASS]` / `[FAIL]` line to the user. If any check fails, stop and tell them how to fix it (see `README.md` and `docs/PRD.md`).
+Manage names later: `python3 -m lens_lib lens add|list|remove`.
+
+Report every `[PASS]` / `[FAIL]` line to the user.

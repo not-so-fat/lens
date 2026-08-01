@@ -2,11 +2,20 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "config.schema.json",
   "type": "object",
-  "required": ["lens_path", "log_path"],
+  "required": ["log_path", "default_lens"],
   "properties": {
-    "lens_path": {
+    "lenses": {
+      "type": "object",
+      "description": "map of kebab-case lens name → absolute path to a .md lens file",
+      "additionalProperties": { "type": "string" }
+    },
+    "lenses_dir": {
       "type": "string",
-      "description": "absolute path to the lens markdown file"
+      "description": "optional directory; names not in `lenses` resolve to <lenses_dir>/<name>.md"
+    },
+    "default_lens": {
+      "type": "string",
+      "description": "lens name used when the worker omits lens"
     },
     "log_path": {
       "type": "string",

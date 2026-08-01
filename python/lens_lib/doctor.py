@@ -1,4 +1,4 @@
-""" /lens-doctor — validate config, lens file, log, hooks, sandbox."""
+""" /lens-doctor — validate config, named lenses, log, hooks, sandbox."""
 
 from __future__ import annotations
 
@@ -9,7 +9,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
 
-from .config import ConfigError, resolve_config, write_config
+from .config import (
+    ConfigError,
+    list_lens_names,
+    readonly_roots,
+    resolve_config,
+    resolve_lens,
+    write_config,
+)
 from .lens_parse import parse_lens_file
 from .log import ensure_log
 from .sandbox import ensure_readonly_path, path_in_sandbox, sandbox_path
@@ -92,52 +99,75 @@ def _hooks_registered_cursor(plugin_root: Optional[Path]) -> tuple[bool, str]:
 def run_doctor(
     *,
     fix_sandbox: bool = True,
-    write_lens: Optional[str] = None,
     write_log: Optional[str] = None,
+    write_lens_name: Optional[str] = None,
+    write_lens_path: Optional[str] = None,
 ) -> DoctorReport:
     report = DoctorReport()
-    if write_lens or write_log:
-        if not (write_lens and write_log):
+    if write_log or write_lens_name or write_lens_path:
+        if not (write_log and write_lens_name and write_lens_path):
             report.add(
                 "write_config",
                 False,
-                "--write-lens and --write-log must be passed together",
+                "pass --write-log, --write-lens-name, and --write-lens-path together",
             )
             return report
-        path = write_config(write_lens, write_log)
-        report.add("write_config", True, f"wrote {path}")
+        try:
+            path = write_config(
+                write_log,
+                lenses={write_lens_name: write_lens_path},
+                default_lens=write_lens_name,
+            )
+            report.add("write_config", True, f"wrote {path}")
+        except ConfigError as e:
+            report.add("write_config", False, str(e))
+            return report
 
     try:
         cfg = resolve_config()
+        names = list_lens_names(cfg)
         report.add(
             "config",
             True,
-            f"source={cfg.source} lens_path={cfg.lens_path} "
-            f"log_path={cfg.log_path} enforce={cfg.enforce}",
+            f"source={cfg.source} default_lens={cfg.default_lens!r} "
+            f"lenses={names} log_path={cfg.log_path} enforce={cfg.enforce}",
         )
     except ConfigError as e:
         report.add("config", False, str(e))
         return report
 
-    lens_ok = cfg.lens_path.is_file()
-    report.add(
-        "lens_file",
-        lens_ok,
-        str(cfg.lens_path) if lens_ok else f"not a file: {cfg.lens_path}",
-    )
-    if lens_ok:
-        parsed = parse_lens_file(cfg.lens_path)
+    try:
+        default_name, default_path = resolve_lens(cfg, None)
         report.add(
-            "lens_shape",
-            parsed.ok,
-            (
-                f"ok; check_blocks={parsed.check_blocks}"
-                if parsed.ok
-                else "; ".join(parsed.errors)
-            ),
+            "default_lens",
+            default_path.is_file(),
+            f"{default_name} → {default_path}",
         )
-    else:
-        report.add("lens_shape", False, "skipped — lens file missing")
+    except ConfigError as e:
+        report.add("default_lens", False, str(e))
+        return report
+
+    # Validate shape for every configured/dir lens that exists
+    shape_ok = True
+    details: List[str] = []
+    for name in list_lens_names(cfg):
+        try:
+            _, path = resolve_lens(cfg, name)
+        except ConfigError as e:
+            shape_ok = False
+            details.append(f"{name}: {e}")
+            continue
+        if not path.is_file():
+            shape_ok = False
+            details.append(f"{name}: missing file {path}")
+            continue
+        parsed = parse_lens_file(path)
+        if parsed.ok:
+            details.append(f"{name}: ok (check_blocks={parsed.check_blocks})")
+        else:
+            shape_ok = False
+            details.append(f"{name}: " + "; ".join(parsed.errors))
+    report.add("lens_shape", shape_ok, "; ".join(details) if details else "no lenses")
 
     try:
         log_path = ensure_log(cfg.log_path)
@@ -152,27 +182,33 @@ def run_doctor(
     ok_u, detail_u = _hooks_registered_cursor(plugin_root)
     report.add("cursor_hooks", ok_u, detail_u)
 
-    readonly_target = cfg.lens_path.parent
+    roots = readonly_roots(cfg)
+    if not roots:
+        roots = [default_path.parent]
     if fix_sandbox:
         try:
-            spath, changed = ensure_readonly_path(readonly_target)
+            changed_any = False
+            spath = sandbox_path()
+            for root in roots:
+                spath, changed = ensure_readonly_path(root)
+                changed_any = changed_any or changed
             report.add(
                 "cursor_sandbox",
                 True,
-                f"{spath} additionalReadonlyPaths includes {readonly_target}"
-                + (" (updated)" if changed else ""),
+                f"{spath} includes {', '.join(str(r) for r in roots)}"
+                + (" (updated)" if changed_any else ""),
             )
         except OSError as e:
             report.add("cursor_sandbox", False, str(e))
     else:
-        ok = path_in_sandbox(readonly_target)
+        missing = [r for r in roots if not path_in_sandbox(r)]
         report.add(
             "cursor_sandbox",
-            ok,
+            not missing,
             (
-                f"{sandbox_path()} includes {readonly_target}"
-                if ok
-                else f"{readonly_target} not in {sandbox_path()} additionalReadonlyPaths"
+                f"{sandbox_path()} includes all lens roots"
+                if not missing
+                else f"missing from sandbox: {', '.join(str(m) for m in missing)}"
             ),
         )
 
