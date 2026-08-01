@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from .config import Config, ConfigError, resolve_config
-from .log import append_record, has_lens_run_since
+from .log import append_record, has_lens_run_for_sessions, has_lens_run_since
 from .paths import filter_watched
 from .transcript import gather_writes, session_id_from_transcript
 from .util import (
@@ -98,7 +98,11 @@ def run_check(
     watched_writes = len(watched) > 0
     lens_run_found = False
     if watched_writes:
+        # Time window when we have a session/write start; else fail closed
+        # (never let since_iso=None match any historical lens_run).
         lens_run_found = has_lens_run_since(cfg.log_path, first_ts)
+        if not lens_run_found:
+            lens_run_found = has_lens_run_for_sessions(cfg.log_path, _real_ids(ids))
 
     should_block = bool(cfg.enforce and watched_writes and not lens_run_found)
     if not watched_writes:
@@ -173,7 +177,8 @@ def record_sidechannel_write(
                 targets.append(workspace_writes_path(workspace_root))
         except OSError:
             pass
+    line = f"{utc_now_iso()}\t{file_path}\n"
     for path in targets:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as f:
-            f.write(file_path + "\n")
+            f.write(line)

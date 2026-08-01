@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional, Sequence
 
 from .util import utc_now_iso
 
@@ -42,12 +42,40 @@ def iter_records(log_path: Path) -> Iterator[Dict[str, Any]]:
 
 
 def has_lens_run_since(log_path: Path, since_iso: Optional[str]) -> bool:
-    """True if any lens_run has ts >= since_iso (string compare works for ISO-Z)."""
+    """
+    True if any lens_run has ts >= since_iso.
+
+    Fail closed when since_iso is None — never treat an unbounded window as
+    satisfied by a historical run (Cursor thin stop payloads).
+    """
+    if since_iso is None:
+        return False
     for rec in iter_records(log_path):
         if rec.get("event") != "lens_run":
             continue
         ts = rec.get("ts") or ""
-        if since_iso is None or ts >= since_iso:
+        if ts >= since_iso:
+            return True
+    return False
+
+
+def has_lens_run_for_sessions(
+    log_path: Path, session_ids: Sequence[str]
+) -> bool:
+    """True if a lens_run is tagged with any of the current conversation/session ids."""
+    wanted = {str(s) for s in session_ids if s and s != "unknown"}
+    if not wanted:
+        return False
+    for rec in iter_records(log_path):
+        if rec.get("event") != "lens_run":
+            continue
+        rec_ids = set()
+        if rec.get("session"):
+            rec_ids.add(str(rec["session"]))
+        for sid in rec.get("session_ids") or []:
+            if sid:
+                rec_ids.add(str(sid))
+        if rec_ids & wanted:
             return True
     return False
 

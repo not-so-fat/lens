@@ -39,6 +39,7 @@ A round is **terminal** when the verdict is PASS or every finding is ESCALATE (n
 {"ts": "<UTC ISO8601>", "event": "lens_run", "lens": "<lens name>",
  "deliverable": "<short description or repo path — the worker must reuse the same key every round>",
  "rounds": <this round number>, "verdict": "pass | escalated", "host": "cursor",
+ "session": "<conversation_id or session_id from this chat>",
  "findings": [{"round": 1, "check": "...", "target": "...", "severity": "FIX | ESCALATE",
                "reaction": "fixed | fixed-class | disputed | escalated", "note": "..."}],
  "escalations": ["the specific question, if any"]}
@@ -50,9 +51,10 @@ Because this agent is readonly, do **not** write the log yourself. After the ver
 
 The worker must append it (from the lens plugin root):
 
-`PYTHONPATH=python python3 -m lens_lib append-run --host cursor --json '...'`
+`PYTHONPATH=python python3 -m lens_lib append-run --host cursor --session '<id>' --json '...'`
 
 - `"lens"` is the **name** (not the file path).
+- `"session"` must be this chat's conversation/session id (Cursor stop has no transcript window without it as a backup).
 - Prior rounds' findings and the worker's stated reaction to each come from the worker's prompt — include them all in `findings` with their round numbers.
 - This round's ESCALATE findings get `reaction: "escalated"`.
 - On a non-terminal round (new FIX findings), do NOT emit `LENS_LOG_APPEND` — the worker will return.

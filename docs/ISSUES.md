@@ -11,6 +11,7 @@ Tracked gaps from Cursor/Claude hook regression work. Decisions below reflect 20
 5. **I-5 loop_limit UX** — unlock hint; last follow-up warning; `hook_limit_exhausted`. README § Unlocking.
 6. **I-6 doctor consistency** — validates PLUGIN_ROOT vars and expanded scripts exist.
 7. **I-1 warning** — `afterFileEdit` stderr warns when workspace root is absent.
+8. **P1 unbounded Cursor gate** — `has_lens_run_since(None)` no longer matches any historical run; side-channel lines are `ts\\tpath` so Cursor gets a write-time window; optional `session` / `session_ids` on `lens_run` as backup. Covered by `test_cursor_stale_lens_run_does_not_unblock_fresh_conversation`.
 
 ## Remaining (not code bugs)
 

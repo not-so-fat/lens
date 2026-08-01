@@ -17,6 +17,15 @@
       "enum": ["claude-code", "cursor"],
       "description": "absent in records written before Cursor support = claude-code"
     },
+    "session": {
+      "type": "string",
+      "description": "conversation/session id; required for reliable Cursor gate when no transcript window"
+    },
+    "session_ids": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "optional aliases (session_id + conversation_id) for the same chat"
+    },
     "findings": {
       "type": "array",
       "items": {

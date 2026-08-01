@@ -269,17 +269,19 @@ class HookIntegrationTests(unittest.TestCase):
             },
             self.env,
         )
+        # ts after the stamped side-channel write so the time window admits it
         with self.log.open("a", encoding="utf-8") as f:
             f.write(
                 json.dumps(
                     {
-                        "ts": "2026-08-01T12:00:00.000Z",
+                        "ts": "2099-01-01T00:00:00Z",
                         "event": "lens_run",
                         "lens": "review",
                         "deliverable": "out",
                         "rounds": 1,
                         "verdict": "pass",
                         "host": "cursor",
+                        "session": "conv-2",
                         "findings": [],
                         "escalations": [],
                     }
@@ -298,6 +300,51 @@ class HookIntegrationTests(unittest.TestCase):
         self.assertEqual(stop.returncode, 0, stop.stderr)
         out = json.loads(stop.stdout)
         self.assertNotIn("followup_message", out)
+
+    def test_cursor_stale_lens_run_does_not_unblock_fresh_conversation(self):
+        """P1: historical lens_run must not satisfy a new chat with no transcript."""
+        with self.log.open("a", encoding="utf-8") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "ts": "2020-01-01T00:00:00Z",
+                        "event": "lens_run",
+                        "lens": "review",
+                        "deliverable": "ancient",
+                        "rounds": 1,
+                        "verdict": "pass",
+                        "host": "cursor",
+                        "session": "other-chat",
+                        "findings": [],
+                        "escalations": [],
+                    }
+                )
+                + "\n"
+            )
+        _run_hook(
+            CURSOR_EDIT,
+            {
+                "file_path": str(self.deliverable),
+                "conversation_id": "fresh-chat",
+                "workspace_roots": [str(self.td)],
+            },
+            self.env,
+        )
+        stop = _run_hook(
+            CURSOR_STOP,
+            {
+                "status": "completed",
+                "conversation_id": "fresh-chat",
+                "workspace_roots": [str(self.td)],
+            },
+            self.env,
+        )
+        out = json.loads(stop.stdout)
+        self.assertIn("followup_message", out)
+        rec = json.loads(self.log.read_text(encoding="utf-8").strip().splitlines()[-1])
+        self.assertTrue(rec["watched_writes"])
+        self.assertFalse(rec["lens_run_found"])
+        self.assertTrue(rec["blocked"])
 
     def test_cursor_enforce_false_no_followup(self):
         _write_config(self.home, self.lens, self.log, enforce=False)

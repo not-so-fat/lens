@@ -56,6 +56,8 @@ def cmd_append_run(args: argparse.Namespace) -> int:
     record["event"] = "lens_run"
     if args.host:
         record["host"] = args.host
+    if getattr(args, "session", None):
+        record["session"] = args.session
     errors = validate_lens_run_shape(record)
     if errors:
         print("append-run: " + "; ".join(errors), file=sys.stderr)
@@ -133,6 +135,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_app = sub.add_parser("append-run", help="append lens_run JSON")
     p_app.add_argument("--json", help="lens_run JSON object")
     p_app.add_argument("--host", choices=["claude-code", "cursor"])
+    p_app.add_argument(
+        "--session",
+        help="conversation/session id to stamp on the lens_run (Cursor gate backup)",
+    )
     p_app.set_defaults(func=cmd_append_run)
 
     p_rw = sub.add_parser("record-write", help="Cursor afterFileEdit side-channel")
