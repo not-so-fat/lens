@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Sequence
 
@@ -41,31 +42,59 @@ def iter_records(log_path: Path) -> Iterator[Dict[str, Any]]:
             yield json.loads(line)
 
 
+def parse_iso_ts(value: str) -> Optional[datetime]:
+    """Parse ISO-8601 timestamps (Z, offset, fractional) to UTC datetimes."""
+    if not value or not isinstance(value, str):
+        return None
+    s = value.strip()
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(s)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 def has_lens_run_since(log_path: Path, since_iso: Optional[str]) -> bool:
     """
-    True if any lens_run has ts >= since_iso.
+    True if any lens_run has ts >= since_iso (instant compare).
 
-    Fail closed when since_iso is None — never treat an unbounded window as
-    satisfied by a historical run (Cursor thin stop payloads).
+    Fail closed when since_iso is None or unparseable — never treat an
+    unbounded / broken window as satisfied by a historical run.
+    Both pass and escalated terminal lens_run records satisfy the gate.
     """
-    if since_iso is None:
+    since = parse_iso_ts(since_iso) if since_iso else None
+    if since is None:
         return False
     for rec in iter_records(log_path):
         if rec.get("event") != "lens_run":
             continue
-        ts = rec.get("ts") or ""
-        if ts >= since_iso:
+        ts = parse_iso_ts(str(rec.get("ts") or ""))
+        if ts is not None and ts >= since:
             return True
     return False
 
 
 def has_lens_run_for_sessions(
-    log_path: Path, session_ids: Sequence[str]
+    log_path: Path,
+    session_ids: Sequence[str],
+    *,
+    since_iso: Optional[str] = None,
 ) -> bool:
-    """True if a lens_run is tagged with any of the current conversation/session ids."""
+    """
+    True if a lens_run is tagged with any of the current conversation/session ids.
+
+    Optional since_iso further requires the run to be at/after that instant
+    (so an earlier review in the same chat does not clear later writes).
+    Both pass and escalated verdicts count.
+    """
     wanted = {str(s) for s in session_ids if s and s != "unknown"}
     if not wanted:
         return False
+    since = parse_iso_ts(since_iso) if since_iso else None
     for rec in iter_records(log_path):
         if rec.get("event") != "lens_run":
             continue
@@ -75,9 +104,47 @@ def has_lens_run_for_sessions(
         for sid in rec.get("session_ids") or []:
             if sid:
                 rec_ids.add(str(sid))
-        if rec_ids & wanted:
+        if not (rec_ids & wanted):
+            continue
+        if since is None:
+            return True
+        ts = parse_iso_ts(str(rec.get("ts") or ""))
+        if ts is not None and ts >= since:
             return True
     return False
+
+
+def latest_lens_run_ts(
+    log_path: Path, session_ids: Optional[Sequence[str]] = None
+) -> Optional[str]:
+    """Latest lens_run ts, optionally restricted to matching session ids."""
+    wanted = None
+    if session_ids is not None:
+        wanted = {str(s) for s in session_ids if s and s != "unknown"}
+        if not wanted:
+            return None
+    latest: Optional[datetime] = None
+    latest_raw: Optional[str] = None
+    for rec in iter_records(log_path):
+        if rec.get("event") != "lens_run":
+            continue
+        if wanted is not None:
+            rec_ids = set()
+            if rec.get("session"):
+                rec_ids.add(str(rec["session"]))
+            for sid in rec.get("session_ids") or []:
+                if sid:
+                    rec_ids.add(str(sid))
+            if not (rec_ids & wanted):
+                continue
+        raw = str(rec.get("ts") or "")
+        ts = parse_iso_ts(raw)
+        if ts is None:
+            continue
+        if latest is None or ts > latest:
+            latest = ts
+            latest_raw = raw
+    return latest_raw
 
 
 def deliverable_has_lens_run(log_path: Path, deliverable: str) -> bool:

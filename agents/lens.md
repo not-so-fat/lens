@@ -51,6 +51,7 @@ A round is **terminal** when the verdict is PASS or every finding is ESCALATE (n
 - Append with Bash (create parent dirs / file if missing); never rewrite existing lines.
 - `ts` must come from `date -u +%Y-%m-%dT%H:%M:%SZ` — never estimated.
 - Always include `"host": "claude-code"`.
+- Either `verdict: "pass"` or `"escalated"` is a terminal `lens_run` and satisfies the Stop-hook gate (enforcement does not require pass).
 
 ## Reply format
 

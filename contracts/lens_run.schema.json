@@ -12,7 +12,10 @@
     },
     "deliverable": { "type": "string", "minLength": 1 },
     "rounds": { "type": "integer", "minimum": 1 },
-    "verdict": { "enum": ["pass", "escalated"] },
+    "verdict": {
+      "enum": ["pass", "escalated"],
+      "description": "both terminal verdicts satisfy the Stop/stop enforcement gate"
+    },
     "host": {
       "enum": ["claude-code", "cursor"],
       "description": "absent in records written before Cursor support = claude-code"

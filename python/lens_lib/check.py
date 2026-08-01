@@ -5,12 +5,18 @@ from __future__ import annotations
 import os
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .config import Config, ConfigError, resolve_config
-from .log import append_record, has_lens_run_for_sessions, has_lens_run_since
+from .log import (
+    append_record,
+    has_lens_run_for_sessions,
+    has_lens_run_since,
+    latest_lens_run_ts,
+)
 from .paths import filter_watched
-from .transcript import gather_writes, session_id_from_transcript
+from .transcript import gather_writes, prune_sidechannel_file, session_id_from_transcript
 from .util import (
     INVOCATION_TEMPLATE,
     conversation_workspace_writes_path,
@@ -82,27 +88,39 @@ def run_check(
     real = _real_ids(ids)
     try:
         if real:
-            # I-3: primary key (workspace, conversation/session id) — no workspace-wide merge
             for sid in real:
                 side_paths.append(str(conversation_workspace_writes_path(cwd, sid)))
         else:
-            # Fallback only when ids are missing / unknown
             side_paths.append(str(workspace_writes_path(cwd)))
     except OSError:
         pass
 
+    # Cursor: ignore side-channel writes already covered by a session lens_run.
+    after_ts = None
+    if not transcript_path and real:
+        after_ts = latest_lens_run_ts(cfg.log_path, real)
+
     written, first_ts = gather_writes(
-        transcript_path, sidechannel_paths=side_paths
+        transcript_path,
+        sidechannel_paths=side_paths,
+        watch_globs=cfg.watch_globs,
+        after_ts=after_ts,
     )
-    watched = filter_watched(written, cfg.watch_globs, cwd)
+    watched, excluded_count = filter_watched(written, cfg.watch_globs, cwd)
     watched_writes = len(watched) > 0
     lens_run_found = False
+    gate = "none"
     if watched_writes:
-        # Time window when we have a session/write start; else fail closed
-        # (never let since_iso=None match any historical lens_run).
-        lens_run_found = has_lens_run_since(cfg.log_path, first_ts)
-        if not lens_run_found:
-            lens_run_found = has_lens_run_for_sessions(cfg.log_path, _real_ids(ids))
+        # Time window when we have a session/write start; else fail closed.
+        # pass and escalated terminal lens_run records both satisfy the gate.
+        if has_lens_run_since(cfg.log_path, first_ts):
+            lens_run_found = True
+            gate = "time"
+        elif has_lens_run_for_sessions(
+            cfg.log_path, real, since_iso=first_ts
+        ):
+            lens_run_found = True
+            gate = "session"
 
     should_block = bool(cfg.enforce and watched_writes and not lens_run_found)
     if not watched_writes:
@@ -123,7 +141,24 @@ def run_check(
             + ("…" if len(watched) > 8 else "")
         )
 
+    # Prune consumed side-channel lines after a satisfying run (Cursor).
+    if lens_run_found and not transcript_path:
+        prune_at = latest_lens_run_ts(cfg.log_path, real) or first_ts
+        for sc in side_paths:
+            try:
+                prune_sidechannel_file(sc, after_ts=prune_at)
+            except OSError:
+                pass
+
     duration_ms = (time.perf_counter() - started) * 1000
+
+    skip_reason = None
+    if watched_writes and not cfg.enforce:
+        skip_reason = "enforce_false"
+    elif not watched_writes and written:
+        skip_reason = "no_watch_match"
+    elif excluded_count and not watched_writes:
+        skip_reason = "excluded_only"
 
     record: Dict[str, Any] = {
         "ts": utc_now_iso(),
@@ -133,9 +168,14 @@ def run_check(
         "watched_writes": watched_writes,
         "lens_run_found": lens_run_found,
         "blocked": should_block,
+        "enforce": cfg.enforce,
+        "gate": gate,
+        "excluded_writes": excluded_count,
         "duration_ms": round(duration_ms, 3),
         "host": host,
     }
+    if skip_reason:
+        record["skip_reason"] = skip_reason
     try:
         append_record(cfg.log_path, record)
     except OSError:

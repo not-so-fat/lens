@@ -71,7 +71,11 @@ def cmd_append_run(args: argparse.Namespace) -> int:
 def cmd_record_write(args: argparse.Namespace) -> int:
     from .check import record_sidechannel_write
 
-    record_sidechannel_write(args.session, args.file_path)
+    record_sidechannel_write(
+        args.session,
+        args.file_path,
+        workspace_root=getattr(args, "workspace_root", None),
+    )
     return 0
 
 
@@ -144,6 +148,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_rw = sub.add_parser("record-write", help="Cursor afterFileEdit side-channel")
     p_rw.add_argument("--session", required=True)
     p_rw.add_argument("--file-path", required=True)
+    p_rw.add_argument(
+        "--workspace-root",
+        help="workspace root for (workspace, conversation) side-channel key",
+    )
     p_rw.set_defaults(func=cmd_record_write)
 
     p_lens = sub.add_parser("lens", help="manage named lenses")

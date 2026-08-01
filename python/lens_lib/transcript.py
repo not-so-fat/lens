@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import List, Optional, Set, Tuple
+from typing import Iterable, List, Optional, Set, Tuple
+
+from .log import parse_iso_ts
 
 WRITE_TOOLS = {
     "Write",
@@ -37,7 +39,7 @@ def first_event_ts(transcript_path: str) -> Optional[str]:
             try:
                 obj = json.loads(line)
             except json.JSONDecodeError:
-                return None
+                continue  # skip junk banners; do not fail the whole transcript
             ts = obj.get("timestamp") or obj.get("ts")
             if isinstance(ts, str) and ts:
                 return ts
@@ -74,10 +76,33 @@ def _walk(obj, out: Set[str]) -> None:
             _walk(item, out)
 
 
-def written_paths_from_transcript(transcript_path: str) -> List[str]:
+def extensions_from_watch_globs(watch_globs: Iterable[str]) -> List[str]:
+    """Derive file extensions from globs like `**/*.md` → `md`."""
+    exts: List[str] = []
+    for pat in watch_globs:
+        m = re.search(r"\.([A-Za-z0-9]+)\)?$", pat.replace("**/", ""))
+        if not m:
+            m = re.search(r"\.([A-Za-z0-9]+)$", pat)
+        if m:
+            ext = m.group(1).lower()
+            if ext not in exts:
+                exts.append(ext)
+    return exts
+
+
+def written_paths_from_transcript(
+    transcript_path: str,
+    *,
+    watch_globs: Optional[Iterable[str]] = None,
+) -> List[str]:
     path = Path(transcript_path)
     if not path.is_file():
         return []
+    exts = extensions_from_watch_globs(watch_globs or [])
+    if not exts:
+        exts = ["md", "html", "pptx"]
+    ext_alt = "|".join(re.escape(e) for e in exts)
+    fallback_re = re.compile(rf"(/[^\s\"']+\.(?:{ext_alt}))")
     found: Set[str] = set()
     with path.open(encoding="utf-8", errors="replace") as f:
         for line in f:
@@ -87,7 +112,7 @@ def written_paths_from_transcript(transcript_path: str) -> List[str]:
             try:
                 obj = json.loads(line)
             except json.JSONDecodeError:
-                for m in re.finditer(r"(/[^\s\"']+\.(?:md|html|pptx))", line):
+                for m in fallback_re.finditer(line):
                     found.add(m.group(1))
                 continue
             _walk(obj, found)
@@ -114,37 +139,81 @@ def parse_sidechannel_line(line: str) -> Tuple[Optional[str], Optional[str]]:
     return None, line
 
 
-def load_sidechannel_writes(writes_file: str) -> List[str]:
+def load_sidechannel_writes(
+    writes_file: str,
+    *,
+    after_ts: Optional[str] = None,
+) -> Tuple[List[str], Optional[str]]:
+    """
+    Load paths from a side-channel file.
+
+    If after_ts is set, keep only lines with ts strictly after that instant
+    (unstamped legacy lines are dropped when filtering).
+    Returns (paths, earliest_kept_ts).
+    """
     path = Path(writes_file)
     if not path.is_file():
-        return []
+        return [], None
+    after = parse_iso_ts(after_ts) if after_ts else None
     out: List[str] = []
+    earliest: Optional[str] = None
+    earliest_dt = None
     for ln in path.read_text(encoding="utf-8", errors="replace").splitlines():
-        _, file_path = parse_sidechannel_line(ln)
-        if file_path:
-            out.append(file_path)
-    return out
+        ts, file_path = parse_sidechannel_line(ln)
+        if not file_path:
+            continue
+        if after is not None:
+            if not ts:
+                continue
+            dt = parse_iso_ts(ts)
+            if dt is None or dt <= after:
+                continue
+        out.append(file_path)
+        if ts:
+            dt = parse_iso_ts(ts)
+            if dt is not None and (earliest_dt is None or dt < earliest_dt):
+                earliest_dt = dt
+                earliest = ts
+    return out, earliest
 
 
 def sidechannel_first_ts(writes_file: str) -> Optional[str]:
-    """Earliest stamped write time in a side-channel file (ISO-Z string min)."""
+    """Earliest stamped write time in a side-channel file."""
+    _, earliest = load_sidechannel_writes(writes_file)
+    return earliest
+
+
+def prune_sidechannel_file(writes_file: str, *, after_ts: Optional[str]) -> None:
+    """Rewrite a side-channel file keeping only lines strictly after after_ts."""
     path = Path(writes_file)
     if not path.is_file():
-        return None
-    earliest: Optional[str] = None
+        return
+    if after_ts is None:
+        path.write_text("", encoding="utf-8")
+        return
+    after = parse_iso_ts(after_ts)
+    if after is None:
+        return
+    kept: List[str] = []
     for ln in path.read_text(encoding="utf-8", errors="replace").splitlines():
         ts, file_path = parse_sidechannel_line(ln)
-        if not file_path or not ts:
+        if not file_path:
             continue
-        if earliest is None or ts < earliest:
-            earliest = ts
-    return earliest
+        if not ts:
+            continue
+        dt = parse_iso_ts(ts)
+        if dt is not None and dt > after:
+            kept.append(f"{ts}\t{file_path}")
+    path.write_text(("\n".join(kept) + ("\n" if kept else "")), encoding="utf-8")
 
 
 def gather_writes(
     transcript_path: Optional[str],
     sidechannel_path: Optional[str] = None,
     sidechannel_paths: Optional[List[str]] = None,
+    *,
+    watch_globs: Optional[Iterable[str]] = None,
+    after_ts: Optional[str] = None,
 ) -> Tuple[List[str], Optional[str]]:
     """Return (written_paths, first_event_ts)."""
     paths: Set[str] = set()
@@ -153,7 +222,9 @@ def gather_writes(
         first_event_ts(transcript_path) if transcript_path else None
     )
     if transcript_path:
-        paths.update(written_paths_from_transcript(transcript_path))
+        paths.update(
+            written_paths_from_transcript(transcript_path, watch_globs=watch_globs)
+        )
     extras: List[str] = []
     if sidechannel_paths:
         extras.extend(sidechannel_paths)
@@ -165,11 +236,12 @@ def gather_writes(
         if not sc or sc in seen_files:
             continue
         seen_files.add(sc)
-        paths.update(load_sidechannel_writes(sc))
-        sc_ts = sidechannel_first_ts(sc)
-        if sc_ts and (side_first is None or sc_ts < side_first):
-            side_first = sc_ts
-    # Cursor thin stop: no transcript — bound the gate by earliest stamped write.
+        # Cursor: only count writes after the last session lens_run (I-7 light).
+        sc_paths, sc_first = load_sidechannel_writes(sc, after_ts=after_ts)
+        paths.update(sc_paths)
+        if sc_first and (side_first is None or sc_first < side_first):
+            side_first = sc_first
+    # Cursor thin stop: no transcript — bound the gate by earliest remaining write.
     if first_ts is None:
         first_ts = side_first
     return sorted(paths), first_ts

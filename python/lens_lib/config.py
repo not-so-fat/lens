@@ -110,7 +110,11 @@ def _from_data(data: dict, source: str) -> Config:
         default_lens=default_lens,
         lenses_dir=lenses_dir,
         enforce=bool(data.get("enforce", True)),
-        watch_globs=list(data.get("watch_globs") or DEFAULT_WATCH_GLOBS),
+        watch_globs=(
+            list(data["watch_globs"] or [])
+            if "watch_globs" in data
+            else list(DEFAULT_WATCH_GLOBS)
+        ),
         source=source,
     )
     # Ensure default resolves
@@ -228,7 +232,9 @@ def write_config(
     payload: dict[str, Any] = {
         "log_path": str(expand_path(log_path)),
         "enforce": enforce,
-        "watch_globs": watch_globs or list(DEFAULT_WATCH_GLOBS),
+        "watch_globs": (
+            list(DEFAULT_WATCH_GLOBS) if watch_globs is None else list(watch_globs)
+        ),
     }
     mapped = {k: str(expand_path(v)) for k, v in (lenses or {}).items()}
     if mapped:

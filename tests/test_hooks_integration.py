@@ -8,12 +8,15 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from typing import Optional
 
 ROOT = Path(__file__).resolve().parents[1]
 PYTHON = ROOT / "python"
+sys.path.insert(0, str(PYTHON))
+from lens_lib.util import utc_now_iso  # noqa: E402
 CLAUDE_STOP = PYTHON / "claude_stop.py"
 CURSOR_STOP = PYTHON / "cursor_stop.py"
 CURSOR_EDIT = PYTHON / "cursor_after_file_edit.py"
@@ -270,11 +273,12 @@ class HookIntegrationTests(unittest.TestCase):
             self.env,
         )
         # ts after the stamped side-channel write so the time window admits it
+        time.sleep(1.05)
         with self.log.open("a", encoding="utf-8") as f:
             f.write(
                 json.dumps(
                     {
-                        "ts": "2099-01-01T00:00:00Z",
+                        "ts": utc_now_iso(),
                         "event": "lens_run",
                         "lens": "review",
                         "deliverable": "out",
@@ -345,6 +349,73 @@ class HookIntegrationTests(unittest.TestCase):
         self.assertTrue(rec["watched_writes"])
         self.assertFalse(rec["lens_run_found"])
         self.assertTrue(rec["blocked"])
+
+    def test_cursor_second_write_after_lens_run_still_enforces(self):
+        """I-7 light: writes after a session lens_run still require a new review."""
+        _run_hook(
+            CURSOR_EDIT,
+            {
+                "file_path": str(self.deliverable),
+                "conversation_id": "multi",
+                "workspace_roots": [str(self.td)],
+            },
+            self.env,
+        )
+        time.sleep(1.05)
+        with self.log.open("a", encoding="utf-8") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "ts": utc_now_iso(),
+                        "event": "lens_run",
+                        "lens": "review",
+                        "deliverable": "first",
+                        "rounds": 1,
+                        "verdict": "pass",
+                        "host": "cursor",
+                        "session": "multi",
+                        "findings": [],
+                        "escalations": [],
+                    }
+                )
+                + "\n"
+            )
+        stop1 = _run_hook(
+            CURSOR_STOP,
+            {
+                "status": "completed",
+                "conversation_id": "multi",
+                "workspace_roots": [str(self.td)],
+            },
+            self.env,
+        )
+        self.assertNotIn("followup_message", json.loads(stop1.stdout))
+        time.sleep(1.05)
+        other = self.td / "second.md"
+        other.write_text("y", encoding="utf-8")
+        _run_hook(
+            CURSOR_EDIT,
+            {
+                "file_path": str(other),
+                "conversation_id": "multi",
+                "workspace_roots": [str(self.td)],
+            },
+            self.env,
+        )
+        stop2 = _run_hook(
+            CURSOR_STOP,
+            {
+                "status": "completed",
+                "conversation_id": "multi",
+                "workspace_roots": [str(self.td)],
+            },
+            self.env,
+        )
+        out = json.loads(stop2.stdout)
+        self.assertIn("followup_message", out)
+        rec = json.loads(self.log.read_text(encoding="utf-8").strip().splitlines()[-1])
+        self.assertTrue(rec["blocked"])
+        self.assertFalse(rec["lens_run_found"])
 
     def test_cursor_enforce_false_no_followup(self):
         _write_config(self.home, self.lens, self.log, enforce=False)

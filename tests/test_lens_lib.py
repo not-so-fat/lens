@@ -23,8 +23,8 @@ from lens_lib.config import (  # noqa: E402
     write_config,
 )
 from lens_lib.lens_parse import parse_lens_file  # noqa: E402
-from lens_lib.log import append_record, has_lens_run_since  # noqa: E402
-from lens_lib.paths import path_matches_watch  # noqa: E402
+from lens_lib.log import append_record, has_lens_run_since, parse_iso_ts  # noqa: E402
+from lens_lib.paths import matches_glob, path_matches_watch  # noqa: E402
 from lens_lib.transcript import first_event_ts, written_paths_from_transcript  # noqa: E402
 
 SAMPLE = """---
@@ -281,6 +281,77 @@ class LensParseTests(unittest.TestCase):
         result = parse_lens_file(path)
         self.assertTrue(result.ok, result.errors)
         self.assertGreaterEqual(result.check_blocks, 1)
+
+
+class PreReleaseFootgunTests(unittest.TestCase):
+    def test_empty_watch_globs_stays_empty(self):
+        with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:
+            home = Path(td) / "home"
+            home.mkdir()
+            lens = Path(td) / "review.md"
+            lens.write_text(SAMPLE)
+            log = Path(td) / "runs.jsonl"
+            old_home = os.environ.get("HOME")
+            os.environ["HOME"] = str(home)
+            os.environ.pop("LENS_LOG_PATH", None)
+            try:
+                cfg_path = home / ".lens"
+                cfg_path.mkdir()
+                (cfg_path / "config.json").write_text(
+                    json.dumps(
+                        {
+                            "lenses": {"review": str(lens)},
+                            "default_lens": "review",
+                            "log_path": str(log),
+                            "watch_globs": [],
+                        }
+                    )
+                )
+                cfg = resolve_config()
+                self.assertEqual(cfg.watch_globs, [])
+            finally:
+                if old_home is None:
+                    os.environ.pop("HOME", None)
+                else:
+                    os.environ["HOME"] = old_home
+
+    def test_has_lens_run_since_compares_instants_not_strings(self):
+        with tempfile.TemporaryDirectory() as td:
+            log = Path(td) / "runs.jsonl"
+            append_record(
+                log,
+                {
+                    "ts": "2026-08-01T10:00:05Z",
+                    "event": "lens_run",
+                    "lens": "review",
+                    "deliverable": "d",
+                    "rounds": 1,
+                    "verdict": "pass",
+                    "findings": [],
+                    "escalations": [],
+                },
+            )
+            # Run at :05Z must NOT satisfy a window starting at :05.500Z
+            self.assertFalse(
+                has_lens_run_since(log, "2026-08-01T10:00:05.500Z")
+            )
+            self.assertTrue(has_lens_run_since(log, "2026-08-01T10:00:05+00:00"))
+            self.assertIsNotNone(parse_iso_ts("2026-08-01T10:00:05.500Z"))
+
+    def test_first_event_ts_skips_junk_banner(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "t.jsonl"
+            p.write_text(
+                "not-json\n"
+                + json.dumps(
+                    {"type": "user", "timestamp": "2026-08-01T10:00:00.000Z"}
+                )
+                + "\n"
+            )
+            self.assertEqual(first_event_ts(str(p)), "2026-08-01T10:00:00.000Z")
+
+    def test_mid_pattern_glob(self):
+        self.assertTrue(matches_glob("docs/a/b.md", "docs/**/*.md"))
 
 
 if __name__ == "__main__":

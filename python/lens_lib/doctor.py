@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -96,8 +97,11 @@ def _validate_hook_commands(
             cmd.replace("${" + required_var + "}", root_s)
             .replace("$" + required_var, root_s)
         )
-        # crude extract of .py path tokens
-        for token in expanded.replace('"', "").split():
+        try:
+            tokens = shlex.split(expanded)
+        except ValueError:
+            tokens = expanded.replace('"', "").split()
+        for token in tokens:
             if token.endswith(".py"):
                 p = Path(token)
                 if not p.is_file():

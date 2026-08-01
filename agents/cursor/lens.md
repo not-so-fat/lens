@@ -60,6 +60,7 @@ The worker must append it (from the lens plugin root):
 - On a non-terminal round (new FIX findings), do NOT emit `LENS_LOG_APPEND` — the worker will return.
 - Ask the worker to set `ts` from `date -u +%Y-%m-%dT%H:%M:%SZ` when appending — never estimate.
 - Always include `"host": "cursor"`.
+- Either `verdict: "pass"` or `"escalated"` is a terminal `lens_run` and satisfies the stop-hook gate (enforcement does not require pass).
 
 ## Reply format
 
