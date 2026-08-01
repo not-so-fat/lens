@@ -29,7 +29,7 @@ def close_deliverable(
     noise: Optional[List[str]] = None,
 ) -> Tuple[dict, str]:
     cfg = resolve_config()
-    if not deliverable_has_lens_run(cfg.vault_root, deliverable):
+    if not deliverable_has_lens_run(cfg.log_path, deliverable):
         raise ValueError(
             f"no lens_run for deliverable {deliverable!r}; refuse human_review"
         )
@@ -43,5 +43,5 @@ def close_deliverable(
         record["misses"] = parse_tagged(misses)
     if noise:
         record["noise"] = parse_tagged(noise)
-    path = append_record(cfg.vault_root, record)
+    path = append_record(cfg.log_path, record)
     return record, str(path)

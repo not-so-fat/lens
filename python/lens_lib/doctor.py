@@ -1,4 +1,4 @@
-""" /lens-doctor — validate config, vault, lens shape, log, hooks, sandbox."""
+""" /lens-doctor — validate config, lens file, log, hooks, sandbox."""
 
 from __future__ import annotations
 
@@ -10,10 +10,10 @@ from pathlib import Path
 from typing import List, Optional
 
 from .config import ConfigError, resolve_config, write_config
-from .lens_parse import default_lens_path, discover_lens_name, parse_lens_file
+from .lens_parse import parse_lens_file
 from .log import ensure_log
-from .sandbox import ensure_vault_readonly, sandbox_path, vault_in_sandbox
-from .util import claude_home, cursor_home, expand_path, run_log_path
+from .sandbox import ensure_readonly_path, path_in_sandbox, sandbox_path
+from .util import claude_home, cursor_home, expand_path
 
 
 @dataclass
@@ -39,7 +39,6 @@ def _plugin_root() -> Optional[Path]:
     env = os.environ.get("CLAUDE_PLUGIN_ROOT") or os.environ.get("CURSOR_PLUGIN_ROOT")
     if env:
         return expand_path(env)
-    # repo root: python/lens_lib/doctor.py → parents[2]
     here = Path(__file__).resolve()
     candidate = here.parents[2]
     if (candidate / ".claude-plugin").is_dir() or (candidate / ".cursor-plugin").is_dir():
@@ -59,7 +58,6 @@ def _hooks_registered_claude(plugin_root: Optional[Path]) -> tuple[bool, str]:
             except json.JSONDecodeError as e:
                 return False, f"invalid claude-hooks.json: {e}"
         return False, f"missing {hooks}"
-    # installed plugin cache — best-effort
     marketplaces = claude_home() / "plugins" / "marketplaces"
     if marketplaces.is_dir():
         for p in marketplaces.rglob("claude-hooks.json"):
@@ -73,7 +71,6 @@ def _hooks_registered_cursor(plugin_root: Optional[Path]) -> tuple[bool, str]:
         if hooks.is_file():
             try:
                 data = json.loads(hooks.read_text(encoding="utf-8"))
-                # Cursor format: top-level hooks.stop OR hooks.hooks.stop
                 root = data.get("hooks") if isinstance(data.get("hooks"), dict) else data
                 if root.get("stop"):
                     return True, f"plugin hooks present: {hooks}"
@@ -94,13 +91,20 @@ def _hooks_registered_cursor(plugin_root: Optional[Path]) -> tuple[bool, str]:
 
 def run_doctor(
     *,
-    lens_name: Optional[str] = None,
     fix_sandbox: bool = True,
-    write_vault: Optional[str] = None,
+    write_lens: Optional[str] = None,
+    write_log: Optional[str] = None,
 ) -> DoctorReport:
     report = DoctorReport()
-    if write_vault:
-        path = write_config(write_vault)
+    if write_lens or write_log:
+        if not (write_lens and write_log):
+            report.add(
+                "write_config",
+                False,
+                "--write-lens and --write-log must be passed together",
+            )
+            return report
+        path = write_config(write_lens, write_log)
         report.add("write_config", True, f"wrote {path}")
 
     try:
@@ -108,59 +112,37 @@ def run_doctor(
         report.add(
             "config",
             True,
-            f"source={cfg.source} vault_root={cfg.vault_root} "
-            f"default_lens={cfg.default_lens!r} default_area={cfg.default_area!r} "
-            f"enforce={cfg.enforce}",
+            f"source={cfg.source} lens_path={cfg.lens_path} "
+            f"log_path={cfg.log_path} enforce={cfg.enforce}",
         )
     except ConfigError as e:
         report.add("config", False, str(e))
         return report
 
-    vault_ok = cfg.vault_root.is_dir()
+    lens_ok = cfg.lens_path.is_file()
     report.add(
-        "vault_reachable",
-        vault_ok,
-        str(cfg.vault_root) if vault_ok else f"not a directory: {cfg.vault_root}",
+        "lens_file",
+        lens_ok,
+        str(cfg.lens_path) if lens_ok else f"not a file: {cfg.lens_path}",
     )
-    if not vault_ok:
-        return report
-
-    lenses_dir = cfg.vault_root / "Direction" / "Lenses"
-    report.add(
-        "lenses_dir",
-        lenses_dir.is_dir(),
-        str(lenses_dir) if lenses_dir.is_dir() else f"missing {lenses_dir}",
-    )
-
-    resolved_lens = lens_name or cfg.default_lens or discover_lens_name(cfg.vault_root)
-    if not resolved_lens:
-        report.add(
-            "lens_shape",
-            False,
-            "no lens to validate — set config default_lens, pass --lens, "
-            "or add Direction/Lenses/<name>.md",
-        )
-    else:
-        lens_path = default_lens_path(cfg.vault_root, resolved_lens)
-        parsed = parse_lens_file(lens_path)
+    if lens_ok:
+        parsed = parse_lens_file(cfg.lens_path)
         report.add(
             "lens_shape",
             parsed.ok,
             (
-                f"{lens_path} ok; check_blocks={parsed.check_blocks}"
+                f"ok; check_blocks={parsed.check_blocks}"
                 if parsed.ok
-                else f"{lens_path}: " + "; ".join(parsed.errors)
+                else "; ".join(parsed.errors)
             ),
         )
+    else:
+        report.add("lens_shape", False, "skipped — lens file missing")
 
     try:
-        log_path = ensure_log(cfg.vault_root)
+        log_path = ensure_log(cfg.log_path)
         writable = os.access(log_path.parent, os.W_OK)
-        report.add(
-            "log_writable",
-            writable,
-            str(run_log_path(cfg.vault_root)),
-        )
+        report.add("log_writable", writable, str(cfg.log_path))
     except OSError as e:
         report.add("log_writable", False, str(e))
 
@@ -170,26 +152,27 @@ def run_doctor(
     ok_u, detail_u = _hooks_registered_cursor(plugin_root)
     report.add("cursor_hooks", ok_u, detail_u)
 
+    readonly_target = cfg.lens_path.parent
     if fix_sandbox:
         try:
-            spath, changed = ensure_vault_readonly(cfg.vault_root)
+            spath, changed = ensure_readonly_path(readonly_target)
             report.add(
                 "cursor_sandbox",
                 True,
-                f"{spath} additionalReadonlyPaths includes vault"
+                f"{spath} additionalReadonlyPaths includes {readonly_target}"
                 + (" (updated)" if changed else ""),
             )
         except OSError as e:
             report.add("cursor_sandbox", False, str(e))
     else:
-        ok = vault_in_sandbox(cfg.vault_root)
+        ok = path_in_sandbox(readonly_target)
         report.add(
             "cursor_sandbox",
             ok,
             (
-                f"{sandbox_path()} includes vault"
+                f"{sandbox_path()} includes {readonly_target}"
                 if ok
-                else f"vault not in {sandbox_path()} additionalReadonlyPaths"
+                else f"{readonly_target} not in {sandbox_path()} additionalReadonlyPaths"
             ),
         )
 

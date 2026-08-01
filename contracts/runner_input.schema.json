@@ -4,13 +4,9 @@
   "type": "object",
   "required": ["round", "deliverable"],
   "properties": {
-    "lens": {
+    "lens_path": {
       "type": "string",
-      "description": "lens file stem under Direction/Lenses/; falls back to config default_lens"
-    },
-    "area": {
-      "type": "string",
-      "description": "area tag for the run log; falls back to config default_area"
+      "description": "optional absolute path override; default is config lens_path"
     },
     "round": { "type": "integer", "minimum": 1 },
     "deliverable": { "type": "string", "description": "stable key; identical across rounds" },

@@ -2,19 +2,15 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "config.schema.json",
   "type": "object",
-  "required": ["vault_root"],
+  "required": ["lens_path", "log_path"],
   "properties": {
-    "vault_root": {
+    "lens_path": {
       "type": "string",
-      "description": "absolute path to the knowledge base holding Direction/Lenses/ and Metadata/usage/"
+      "description": "absolute path to the lens markdown file"
     },
-    "default_lens": {
+    "log_path": {
       "type": "string",
-      "description": "stem of Direction/Lenses/<name>.md used when the worker omits lens"
-    },
-    "default_area": {
-      "type": "string",
-      "description": "area tag used when the worker omits area"
+      "description": "absolute path to the append-only lens_runs.jsonl file"
     },
     "enforce": { "type": "boolean", "default": true },
     "watch_globs": {

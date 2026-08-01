@@ -1,4 +1,4 @@
-"""Merge vault_root into ~/.cursor/sandbox.json additionalReadonlyPaths."""
+"""Merge lens file directory into ~/.cursor/sandbox.json additionalReadonlyPaths."""
 
 from __future__ import annotations
 
@@ -13,13 +13,13 @@ def sandbox_path() -> Path:
     return cursor_home() / "sandbox.json"
 
 
-def ensure_vault_readonly(vault_root: Path) -> Tuple[Path, bool]:
+def ensure_readonly_path(target: Path) -> Tuple[Path, bool]:
     """
-    Ensure vault_root is listed under additionalReadonlyPaths.
-    Returns (path, changed).
+    Ensure `target` (typically the lens file's parent dir) is listed under
+    additionalReadonlyPaths. Returns (sandbox.json path, changed).
     """
     path = sandbox_path()
-    vault = str(expand_path(str(vault_root)))
+    entry = str(expand_path(str(target)))
     data: Dict[str, Any] = {}
     if path.is_file():
         try:
@@ -32,17 +32,17 @@ def ensure_vault_readonly(vault_root: Path) -> Tuple[Path, bool]:
     key = "additionalReadonlyPaths"
     existing: List[str] = list(data.get(key) or [])
     normalized = [str(expand_path(p)) for p in existing]
-    if vault in normalized:
+    if entry in normalized:
         return path, False
 
-    existing.append(vault)
+    existing.append(entry)
     data[key] = existing
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     return path, True
 
 
-def vault_in_sandbox(vault_root: Path) -> bool:
+def path_in_sandbox(target: Path) -> bool:
     path = sandbox_path()
     if not path.is_file():
         return False
@@ -50,8 +50,8 @@ def vault_in_sandbox(vault_root: Path) -> bool:
         data = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return False
-    vault = str(expand_path(str(vault_root)))
+    entry = str(expand_path(str(target)))
     for p in data.get("additionalReadonlyPaths") or []:
-        if str(expand_path(str(p))) == vault:
+        if str(expand_path(str(p))) == entry:
             return True
     return False

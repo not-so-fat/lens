@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 
 REQUIRED_HEADINGS = [
@@ -40,7 +40,6 @@ def parse_lens_file(path: Path) -> LensParseResult:
         if end < 0:
             errors.append("unterminated YAML frontmatter")
 
-    # Heading order: required headings appear in order (extra sections allowed)
     positions: List[tuple[str, int]] = []
     for h in REQUIRED_HEADINGS:
         idx = text.find(h)
@@ -65,21 +64,3 @@ def parse_lens_file(path: Path) -> LensParseResult:
         errors=errors,
         check_blocks=check_blocks,
     )
-
-
-def default_lens_path(vault_root: Path, lens: str) -> Path:
-    return vault_root / "Direction" / "Lenses" / f"{lens}.md"
-
-
-def find_lens(vault_root: Path, lens: str) -> Optional[Path]:
-    path = default_lens_path(vault_root, lens)
-    return path if path.is_file() else None
-
-
-def discover_lens_name(vault_root: Path) -> Optional[str]:
-    """First *.md stem under Direction/Lenses/ (sorted), if any."""
-    lenses = vault_root / "Direction" / "Lenses"
-    if not lenses.is_dir():
-        return None
-    names = sorted(p.stem for p in lenses.glob("*.md") if p.is_file())
-    return names[0] if names else None

@@ -3,7 +3,7 @@ name: lens-close
 description: Record a human_review line for a deliverable after the owner finishes review.
 ---
 
-Append a `human_review` record to the vault run log.
+Append a `human_review` record to the configured run log (`log_path`).
 
 Usage from the user:
 

@@ -1,4 +1,4 @@
-"""Config resolution: LENS_VAULT_ROOT → ~/.lens/config.json → error."""
+"""Config: LENS_PATH / LENS_LOG_PATH → ~/.lens/config.json → error."""
 
 from __future__ import annotations
 
@@ -15,11 +15,10 @@ DEFAULT_WATCH_GLOBS = ["**/*.md", "**/*.html", "**/*.pptx"]
 
 @dataclass
 class Config:
-    vault_root: Path
+    lens_path: Path
+    log_path: Path
     enforce: bool = True
     watch_globs: List[str] = field(default_factory=lambda: list(DEFAULT_WATCH_GLOBS))
-    default_lens: Optional[str] = None
-    default_area: Optional[str] = None
     source: str = "unknown"  # "env" | "config" | "env+config"
 
 
@@ -31,14 +30,13 @@ SETUP_INSTRUCTIONS = """\
 Lens config missing. Create ~/.lens/config.json:
 
 {
-  "vault_root": "/absolute/path/to/your/vault",
-  "default_lens": "<lens-file-stem>",
-  "default_area": "<area-tag>",
+  "lens_path": "/absolute/path/to/your-lens.md",
+  "log_path": "/absolute/path/to/lens_runs.jsonl",
   "enforce": true,
   "watch_globs": ["**/*.md", "**/*.html", "**/*.pptx"]
 }
 
-Or set LENS_VAULT_ROOT to an absolute vault path.
+Or set LENS_PATH and LENS_LOG_PATH to absolute file paths.
 Then run /lens-doctor.
 """
 
@@ -54,77 +52,67 @@ def _load_file() -> Tuple[Optional[dict], Optional[Path]]:
     return data, path
 
 
-def _optional_str(data: Optional[dict], key: str) -> Optional[str]:
-    if not data:
-        return None
-    val = data.get(key)
-    if val is None or val == "":
-        return None
-    if not isinstance(val, str):
-        raise ConfigError(f"{key} must be a string")
-    return val
+def _require_path(value: Any, label: str) -> Path:
+    if not value or not isinstance(value, str):
+        raise ConfigError(f"{label} missing or not a string\n\n{SETUP_INSTRUCTIONS}")
+    return expand_path(value)
 
 
 def resolve_config() -> Config:
-    """Resolve vault_root and options. Raises ConfigError with setup text."""
-    env_root = os.environ.get("LENS_VAULT_ROOT", "").strip()
+    """Resolve lens_path + log_path. Raises ConfigError with setup text."""
+    env_lens = os.environ.get("LENS_PATH", "").strip()
+    env_log = os.environ.get("LENS_LOG_PATH", "").strip()
     file_data, file_path = _load_file()
 
-    if env_root:
-        vault = expand_path(env_root)
+    if env_lens or env_log:
+        if not (env_lens and env_log):
+            raise ConfigError(
+                "LENS_PATH and LENS_LOG_PATH must both be set when using env overrides"
+            )
         enforce = True
         watch = list(DEFAULT_WATCH_GLOBS)
         source = "env"
-        default_lens = _optional_str(file_data, "default_lens")
-        default_area = _optional_str(file_data, "default_area")
         if file_data:
             enforce = bool(file_data.get("enforce", True))
             watch = list(file_data.get("watch_globs") or DEFAULT_WATCH_GLOBS)
             source = "env+config"
         return Config(
-            vault_root=vault,
+            lens_path=_require_path(env_lens, "LENS_PATH"),
+            log_path=_require_path(env_log, "LENS_LOG_PATH"),
             enforce=enforce,
             watch_globs=watch,
-            default_lens=default_lens,
-            default_area=default_area,
             source=source,
         )
 
     if file_data:
-        root = file_data.get("vault_root")
-        if not root or not isinstance(root, str):
-            raise ConfigError(
-                f"vault_root missing in {file_path}\n\n{SETUP_INSTRUCTIONS}"
-            )
         return Config(
-            vault_root=expand_path(root),
+            lens_path=_require_path(file_data.get("lens_path"), "lens_path"),
+            log_path=_require_path(file_data.get("log_path"), "log_path"),
             enforce=bool(file_data.get("enforce", True)),
             watch_globs=list(file_data.get("watch_globs") or DEFAULT_WATCH_GLOBS),
-            default_lens=_optional_str(file_data, "default_lens"),
-            default_area=_optional_str(file_data, "default_area"),
             source="config",
         )
 
-    raise ConfigError(SETUP_INSTRUCTIONS)
+    raise ConfigError(
+        f"no config at {file_path}\n\n{SETUP_INSTRUCTIONS}"
+        if file_path
+        else SETUP_INSTRUCTIONS
+    )
 
 
 def write_config(
-    vault_root: str,
+    lens_path: str,
+    log_path: str,
     enforce: bool = True,
     watch_globs: Optional[List[str]] = None,
-    default_lens: Optional[str] = None,
-    default_area: Optional[str] = None,
 ) -> Path:
     path = lens_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     payload: dict[str, Any] = {
-        "vault_root": str(expand_path(vault_root)),
+        "lens_path": str(expand_path(lens_path)),
+        "log_path": str(expand_path(log_path)),
         "enforce": enforce,
         "watch_globs": watch_globs or list(DEFAULT_WATCH_GLOBS),
     }
-    if default_lens:
-        payload["default_lens"] = default_lens
-    if default_area:
-        payload["default_area"] = default_area
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     return path

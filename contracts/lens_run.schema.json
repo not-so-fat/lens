@@ -2,12 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "lens_run.schema.json",
   "type": "object",
-  "required": ["ts", "event", "lens", "area", "deliverable", "rounds", "verdict", "findings", "escalations"],
+  "required": ["ts", "event", "lens", "deliverable", "rounds", "verdict", "findings", "escalations"],
   "properties": {
     "ts": { "type": "string", "format": "date-time" },
     "event": { "const": "lens_run" },
-    "lens": { "type": "string" },
-    "area": { "type": "string" },
+    "lens": {
+      "type": "string",
+      "description": "absolute lens file path (or stable stem) used for this run"
+    },
     "deliverable": { "type": "string", "minLength": 1 },
     "rounds": { "type": "integer", "minimum": 1 },
     "verdict": { "enum": ["pass", "escalated"] },

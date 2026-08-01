@@ -38,15 +38,10 @@ def session_writes_path(session: str) -> Path:
     return expand_path("~/.lens/sessions") / session / "writes.txt"
 
 
-def run_log_path(vault_root: Path) -> Path:
-    return vault_root / "Metadata" / "usage" / "lens_runs.jsonl"
-
-
 INVOCATION_TEMPLATE = (
     "Invoke the `lens` agent with: "
-    "lens=<stem from config default_lens or explicit>, "
-    "area=<from config default_area or explicit>, round=<n>, "
-    'deliverable="<stable key>", files=[...], sources=[...], '
+    "round=<n>, deliverable=\"<stable key>\", files=[...], sources=[...], "
+    "optional lens_path=<absolute .md override>, "
     "and on rounds after the first: prior_findings + your reaction per finding. "
     "Reuse the same deliverable key every round."
 )

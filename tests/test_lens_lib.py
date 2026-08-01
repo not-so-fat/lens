@@ -24,24 +24,30 @@ from lens_lib.transcript import first_event_ts, written_paths_from_transcript  #
 
 class ConfigTests(unittest.TestCase):
     def test_env_overrides(self):
-        with tempfile.TemporaryDirectory() as td:
-            vault = Path(td) / "vault"
-            vault.mkdir()
-            old = os.environ.get("LENS_VAULT_ROOT")
-            os.environ["LENS_VAULT_ROOT"] = str(vault)
+        with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:
+            lens = Path(td) / "lens.md"
+            log = Path(td) / "runs.jsonl"
+            lens.write_text("x")
+            log.write_text("")
+            old_l = os.environ.get("LENS_PATH")
+            old_g = os.environ.get("LENS_LOG_PATH")
+            os.environ["LENS_PATH"] = str(lens)
+            os.environ["LENS_LOG_PATH"] = str(log)
             try:
                 cfg = resolve_config()
-                self.assertEqual(cfg.vault_root, vault.resolve())
+                self.assertEqual(cfg.lens_path, lens.resolve())
+                self.assertEqual(cfg.log_path, log.resolve())
                 self.assertIn(cfg.source, ("env", "env+config"))
             finally:
-                if old is None:
-                    os.environ.pop("LENS_VAULT_ROOT", None)
-                else:
-                    os.environ["LENS_VAULT_ROOT"] = old
+                for k, old in (("LENS_PATH", old_l), ("LENS_LOG_PATH", old_g)):
+                    if old is None:
+                        os.environ.pop(k, None)
+                    else:
+                        os.environ[k] = old
 
     def test_missing_raises(self):
-        old = os.environ.pop("LENS_VAULT_ROOT", None)
-        # Point HOME at empty temp so ~/.lens is missing
+        old_l = os.environ.pop("LENS_PATH", None)
+        old_g = os.environ.pop("LENS_LOG_PATH", None)
         with tempfile.TemporaryDirectory() as td:
             old_home = os.environ.get("HOME")
             os.environ["HOME"] = td
@@ -53,13 +59,14 @@ class ConfigTests(unittest.TestCase):
                     os.environ.pop("HOME", None)
                 else:
                     os.environ["HOME"] = old_home
-                if old is not None:
-                    os.environ["LENS_VAULT_ROOT"] = old
+                if old_l is not None:
+                    os.environ["LENS_PATH"] = old_l
+                if old_g is not None:
+                    os.environ["LENS_LOG_PATH"] = old_g
 
 
 class PathsTests(unittest.TestCase):
     def test_md_glob(self):
-        # Avoid system temp — excluded by §7.4
         cwd = str(ROOT)
         md = str(ROOT / "docs" / "PRD.md")
         py = str(ROOT / "python" / "claude_stop.py")
@@ -103,21 +110,22 @@ class TranscriptTests(unittest.TestCase):
 
 class LogAndCheckTests(unittest.TestCase):
     def test_block_without_lens_run(self):
-        # Keep written deliverable outside system temp (excluded by §7.4)
         with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:
-            vault = Path(td) / "vault"
-            (vault / "Metadata" / "usage").mkdir(parents=True)
-            (vault / "Direction" / "Lenses").mkdir(parents=True)
+            lens = Path(td) / "lens.md"
+            log = Path(td) / "runs.jsonl"
+            lens.write_text("---\ntitle: t\n---\n## Core principle\n- x\n## When To Run This\n- y\n## Process\n**A?**\n- z\n## Failure-Mode Guards\n- g\n")
             home = Path(td) / "home"
             home.mkdir()
             deliverable = Path(td) / "doc.md"
             deliverable.write_text("x", encoding="utf-8")
             old_home = os.environ.get("HOME")
-            old_env = os.environ.get("LENS_VAULT_ROOT")
+            old_l = os.environ.get("LENS_PATH")
+            old_g = os.environ.get("LENS_LOG_PATH")
             os.environ["HOME"] = str(home)
-            os.environ["LENS_VAULT_ROOT"] = str(vault)
+            os.environ.pop("LENS_PATH", None)
+            os.environ.pop("LENS_LOG_PATH", None)
             try:
-                write_config(str(vault), enforce=True)
+                write_config(str(lens), str(log), enforce=True)
                 transcript = Path(td) / "sess.jsonl"
                 transcript.write_text(
                     json.dumps(
@@ -160,12 +168,11 @@ class LogAndCheckTests(unittest.TestCase):
                 self.assertIn("Invoke the `lens` agent", result.message)
 
                 append_record(
-                    vault,
+                    log,
                     {
                         "ts": "2026-07-31T10:00:02.000Z",
                         "event": "lens_run",
-                        "lens": "sample",
-                        "area": "work",
+                        "lens": str(lens),
                         "deliverable": "doc",
                         "rounds": 1,
                         "verdict": "pass",
@@ -174,7 +181,7 @@ class LogAndCheckTests(unittest.TestCase):
                         "escalations": [],
                     },
                 )
-                self.assertTrue(has_lens_run_since(vault, "2026-07-31T10:00:00.000Z"))
+                self.assertTrue(has_lens_run_since(log, "2026-07-31T10:00:00.000Z"))
                 result2 = run_check(
                     host="claude-code",
                     transcript_path=str(transcript),
@@ -188,32 +195,35 @@ class LogAndCheckTests(unittest.TestCase):
                     os.environ.pop("HOME", None)
                 else:
                     os.environ["HOME"] = old_home
-                if old_env is None:
-                    os.environ.pop("LENS_VAULT_ROOT", None)
-                else:
-                    os.environ["LENS_VAULT_ROOT"] = old_env
+                for k, old in (("LENS_PATH", old_l), ("LENS_LOG_PATH", old_g)):
+                    if old is None:
+                        os.environ.pop(k, None)
+                    else:
+                        os.environ[k] = old
 
     def test_close_requires_lens_run(self):
-        with tempfile.TemporaryDirectory() as td:
-            vault = Path(td) / "vault"
-            (vault / "Metadata" / "usage").mkdir(parents=True)
+        with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:
+            lens = Path(td) / "lens.md"
+            log = Path(td) / "runs.jsonl"
+            lens.write_text("x")
             home = Path(td) / "home"
             home.mkdir()
             old_home = os.environ.get("HOME")
-            old_env = os.environ.get("LENS_VAULT_ROOT")
+            old_l = os.environ.get("LENS_PATH")
+            old_g = os.environ.get("LENS_LOG_PATH")
             os.environ["HOME"] = str(home)
-            os.environ["LENS_VAULT_ROOT"] = str(vault)
+            os.environ.pop("LENS_PATH", None)
+            os.environ.pop("LENS_LOG_PATH", None)
             try:
-                write_config(str(vault))
+                write_config(str(lens), str(log))
                 with self.assertRaises(ValueError):
                     close_deliverable("missing", 0)
                 append_record(
-                    vault,
+                    log,
                     {
                         "ts": "2026-07-31T10:00:02.000Z",
                         "event": "lens_run",
-                        "lens": "sample",
-                        "area": "work",
+                        "lens": str(lens),
                         "deliverable": "d1",
                         "rounds": 1,
                         "verdict": "pass",
@@ -229,10 +239,11 @@ class LogAndCheckTests(unittest.TestCase):
                     os.environ.pop("HOME", None)
                 else:
                     os.environ["HOME"] = old_home
-                if old_env is None:
-                    os.environ.pop("LENS_VAULT_ROOT", None)
-                else:
-                    os.environ["LENS_VAULT_ROOT"] = old_env
+                for k, old in (("LENS_PATH", old_l), ("LENS_LOG_PATH", old_g)):
+                    if old is None:
+                        os.environ.pop(k, None)
+                    else:
+                        os.environ[k] = old
 
 
 class LensParseTests(unittest.TestCase):

@@ -8,7 +8,6 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
-# Allow `python path/to/python -m lens_lib` when parent is on sys.path
 _HERE = Path(__file__).resolve().parent.parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
@@ -18,9 +17,9 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     from .doctor import print_report, run_doctor
 
     report = run_doctor(
-        lens_name=args.lens,
         fix_sandbox=not args.no_fix_sandbox,
-        write_vault=args.write_config,
+        write_lens=args.write_lens,
+        write_log=args.write_log,
     )
     return print_report(report)
 
@@ -35,7 +34,7 @@ def cmd_close(args: argparse.Namespace) -> int:
             misses=args.miss or None,
             noise=args.noise or None,
         )
-    except (ValueError, Exception) as e:
+    except Exception as e:
         print(f"lens-close: {e}", file=sys.stderr)
         return 1
     print(json.dumps(record, ensure_ascii=False))
@@ -61,7 +60,7 @@ def cmd_append_run(args: argparse.Namespace) -> int:
         print("append-run: " + "; ".join(errors), file=sys.stderr)
         return 1
     cfg = resolve_config()
-    path = append_record(cfg.vault_root, record)
+    path = append_record(cfg.log_path, record)
     print(path)
     return 0
 
@@ -78,12 +77,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p_doc = sub.add_parser("doctor", help="validate lens install")
-    p_doc.add_argument(
-        "--lens",
-        default=None,
-        help="lens file stem (default: config default_lens, else first under Direction/Lenses/)",
-    )
-    p_doc.add_argument("--write-config", metavar="VAULT_ROOT")
+    p_doc.add_argument("--write-lens", metavar="PATH", help="with --write-log, write config")
+    p_doc.add_argument("--write-log", metavar="PATH", help="with --write-lens, write config")
     p_doc.add_argument("--no-fix-sandbox", action="store_true")
     p_doc.set_defaults(func=cmd_doctor)
 

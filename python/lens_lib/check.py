@@ -46,7 +46,6 @@ def run_check(
         cfg = config or resolve_config()
     except ConfigError as e:
         duration_ms = (time.perf_counter() - started) * 1000
-        # Cannot enforce without config — warn, do not block forever
         msg = f"Lens config unresolved; enforcement skipped.\n{e}"
         return CheckResult(
             watched_writes=False,
@@ -66,7 +65,7 @@ def run_check(
     watched_writes = len(watched) > 0
     lens_run_found = False
     if watched_writes:
-        lens_run_found = has_lens_run_since(cfg.vault_root, first_ts)
+        lens_run_found = has_lens_run_since(cfg.log_path, first_ts)
 
     should_block = bool(cfg.enforce and watched_writes and not lens_run_found)
     if not watched_writes:
@@ -89,7 +88,6 @@ def run_check(
 
     duration_ms = (time.perf_counter() - started) * 1000
 
-    # Always append hook_check when vault is known
     record: Dict[str, Any] = {
         "ts": utc_now_iso(),
         "event": "hook_check",
@@ -101,7 +99,7 @@ def run_check(
         "host": host,
     }
     try:
-        append_record(cfg.vault_root, record)
+        append_record(cfg.log_path, record)
     except OSError:
         pass
 

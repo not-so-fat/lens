@@ -1,29 +1,12 @@
 ---
-area: personal
 created: 2026-07-31
 updated: 2026-08-01
-tags:
-  - idea
-  - prd
-topics:
-  - side_projects
-  - agent_deck
 status: refining
-triaged:
-triage_note:
-promotes-to:
-related:
-  - "`Direction/Lenses/<lens>.md`"
-  - "[[Sources/Ideas/personal/2026-07-30 Buddy-agent experiment — lens runner brief]]"
-  - "[[Sources/Ideas/personal/2026-07-30 Task-Specific Lenses — Product Insight from the Half-Year Review Session]]"
-  - "[[Sources/Ideas/personal/2026-07-31 Taste profile — extracted from session history]]"
-  - "[[Sources/Ideas/personal/2026-07-30 Buddy Agent — Review Loop Across Hosts]]"
-source: "Claude Code sessions 2026-07-30/31 — buddy-agent experiment, run-log review, taste extraction; plugin PRD per AI-Codegen PRD Scaffold (pb_prd_scaffold)"
 ---
 
 # Lens — personal review standards for AI agents (product idea + plugin PRD)
 
-> **Canonical home:** this file lives in the `lens` plugin repo (`docs/PRD.md`). Implementation note (2026-08-01): Cursor support uses the native `.cursor-plugin/` marketplace (Team Marketplace / local import), not a hand-merge into `~/.cursor/`; F5.3’s install-script wording is superseded. Doctor still merges `vault_root` into `~/.cursor/sandbox.json` `additionalReadonlyPaths`.
+> **Canonical home:** this file lives in the `lens` plugin repo (`docs/PRD.md`). Implementation note (2026-08-01): Cursor support uses the native `.cursor-plugin/` marketplace (Team Marketplace / local import), not a hand-merge into `~/.cursor/`; F5.3’s install-script wording is superseded. Doctor still merges the lens file's parent directory into `~/.cursor/sandbox.json` `additionalReadonlyPaths`.
 
 > **One-line:** professionals working with AI agents spend their review time on issues that are simple *for them*; a lens — their review standards as a runnable, versioned file — lets agents resolve those issues among themselves before human review, and turns every correction into a permanent standard instead of a repeated conversation.
 
@@ -45,7 +28,7 @@ source: "Claude Code sessions 2026-07-30/31 — buddy-agent experiment, run-log 
 
 ## Evidence the mechanism works (two days, measured)
 
-- 16 real deliverables ran produce → lens review → fix loops: 109 findings, 105 resolved agent-to-agent (37 as whole-class fixes), and the human saw only 2 escalations + 2 disputes. 15 of 16 loops closed in 2–3 rounds. (Run log: `Metadata/usage/lens_runs.jsonl`, records through 2026-07-31T20:02Z, newest record per deliverable.)
+- 16 real deliverables ran produce → lens review → fix loops: 109 findings, 105 resolved agent-to-agent (37 as whole-class fixes), and the human saw only 2 escalations + 2 disputes. 15 of 16 loops closed in 2–3 rounds. (Run log: owner-chosen `log_path`, records through 2026-07-31T20:02Z, newest record per deliverable.)
 - The two verification directions have different economics — truth checks run autonomously and catch what humans can't audit at scale; taste converges only through corrections promoted into the lens ([[Sources/Ideas/personal/2026-07-30 Task-Specific Lenses — Product Insight from the Half-Year Review Session]]).
 - Bootstrapping is cheap: mining 23 sessions of existing history produced 6 new lens criteria in one pass ([[Sources/Ideas/personal/2026-07-31 Taste profile — extracted from session history]]). Onboarding = mine the user's own history, not ask them to write rules from scratch.
 
@@ -61,7 +44,7 @@ source: "Claude Code sessions 2026-07-30/31 — buddy-agent experiment, run-log 
 
 ## Deployment path (personal need first)
 
-1. **Now:** file-based v0 — lens in the vault, runner as a local agent file, one laptop.
+1. **Now:** file-based v0 — lens as a local markdown file, runner as a local agent file, one laptop.
 2. **Next: one private repo — Claude Code plugin + Cursor support** — any laptop, one install command per host; lens root configurable. Spec: the plugin PRD below.
 3. **Then:** lens as an Agent Deck card — per-business lens switching via deck binding; Codex reached through the existing deck MCP + stub machinery (feasibility evaluated below).
 
@@ -74,15 +57,15 @@ Agent Deck is context switching; a lens is judgment that must travel with that c
 | Capability the loop needs | Cursor | Codex |
 | --- | --- | --- |
 | Reviewer with fresh context | YES — subagents: `.cursor/agents/` (project) or `~/.cursor/agents/` (user), `readonly: true`, own context window ([docs](https://cursor.com/docs/subagents)) | YES on CLI/desktop — subagents: `~/.codex/agents/*.toml`, read-only sandbox, fresh session ([docs](https://learn.chatgpt.com/docs/agent-configuration/subagents)) |
-| Lens from vault path or MCP | YES, one config step — `sandbox.json` `additionalReadonlyPaths`, or MCP ([sandbox](https://cursor.com/docs/reference/sandbox), [MCP](https://cursor.com/docs/mcp)) | YES — file reads unrestricted by sandbox ([config](https://learn.chatgpt.com/docs/config-file/config-advanced)); MCP config shared across CLI/desktop/IDE ([MCP](https://learn.chatgpt.com/docs/extend/mcp)) |
+| Lens from filepath or MCP | YES, one config step — `sandbox.json` `additionalReadonlyPaths`, or MCP ([sandbox](https://cursor.com/docs/reference/sandbox), [MCP](https://cursor.com/docs/mcp)) | YES — file reads unrestricted by sandbox ([config](https://learn.chatgpt.com/docs/config-file/config-advanced)); MCP config shared across CLI/desktop/IDE ([MCP](https://learn.chatgpt.com/docs/extend/mcp)) |
 | Blocking enforcement at turn end | YES on desktop IDE — `stop` hook returns `followup_message`, bounded forced continuation (`loop_limit`, default 5); hooks GA, config at `~/.cursor/hooks.json` (user) or project ([docs](https://cursor.com/docs/hooks)) | YES on CLI/desktop — `Stop` hook `{"decision": "block"}` re-prompts until satisfied ([docs](https://learn.chatgpt.com/docs/hooks)) |
-| JSONL append to the vault log | YES — hook scripts run outside the sandbox ([hooks](https://cursor.com/docs/hooks)); agent writes need `additionalReadwritePaths` ([sandbox](https://cursor.com/docs/reference/sandbox)) | YES — `writable_roots` config ([config](https://learn.chatgpt.com/docs/config-file/config-advanced)), or hook-side append ([hooks](https://learn.chatgpt.com/docs/hooks)) |
+| JSONL append to the run log | YES — hook scripts run outside the sandbox ([hooks](https://cursor.com/docs/hooks)); agent writes need `additionalReadwritePaths` ([sandbox](https://cursor.com/docs/reference/sandbox)) | YES — `writable_roots` config ([config](https://learn.chatgpt.com/docs/config-file/config-advanced)), or hook-side append ([hooks](https://learn.chatgpt.com/docs/hooks)) |
 
 **Verdict: the loop ports to both hosts with native primitives — feasibility does not depend on the deck.** Remaining gaps: per-surface — Cursor CLI hook delivery is documented-limited ([hooks](https://cursor.com/docs/hooks)) and reported unreliable ([forum report](https://forum.cursor.com/t/cursor-cli-doesnt-send-all-events-defined-in-hooks/148316)); Codex IDE-extension hooks are undocumented ([IDE docs](https://learn.chatgpt.com/docs/codex/ide)) — and one per-host design limit: Cursor's stop gate is bounded continuation (`loop_limit`, default 5), not a hard block. The bounded gate is accepted: 15 of 16 observed loops closed within 3 rounds (Evidence above). The deck card's value is therefore lens distribution/switching, not feasibility.
 
 ## Open questions — marked by what each blocks
 
-- **Blocks the deck card** — lens body's home: deck card vs vault file (one source of truth — the no-mirroring rule forces a choice).
+- **Blocks the deck card** — lens body's home: deck card vs local file (one source of truth — the no-mirroring rule forces a choice).
 - **Resolved for the plugin release by exclusion (§10); reopens at the deck card** — per-surface enforcement gaps: Cursor CLI (hook delivery unreliable) is excluded from the plugin release; the Codex IDE extension (hooks undocumented) remains a deck-card question; the run log's skip rate is the evidence to collect.
 - **Shapes the plugin step, worth arguing** — privacy: lenses encode work context; multi-laptop sync must stay private (private repo suffices? deck sync changes the answer).
 - **Blocks nothing yet** — team lenses: can a team share standards the way one person does, and who reviews the reviewer?
@@ -105,7 +88,7 @@ Primary persona: a product lead who produces documents, decks, and specs through
 
 | Role | Goal | Plugin surface |
 | --- | --- | --- |
-| Lens owner (human) | Standards enforced everywhere; final review only | vault lens file; `/lens-close`; `/lens-doctor` |
+| Lens owner (human) | Standards enforced everywhere; final review only | lens file path; `/lens-close`; `/lens-doctor` |
 | Worker agent | Pass the lens loop before surfacing a deliverable | `lens` subagent invocation contract (§7.3), Claude Code and Cursor |
 | Runner (`lens` subagent) | Execute the lens; report FIX/ESCALATE/PASS; log terminal rounds | plugin agent (Claude Code) / `.cursor` subagent (Cursor) + run log (§7.1) |
 
@@ -119,13 +102,13 @@ Deferred roles (team members, Codex host): see §10.
 Acceptance:
 - [ ] `claude plugin marketplace add <private-repo>` + `claude plugin install lens` succeeds on a clean machine with repo access
 - [ ] a new session lists the `lens` agent
-- [ ] `/lens-doctor` exits green after writing `~/.lens/config.json` with a valid `vault_root`
+- [ ] `/lens-doctor` exits green after writing `~/.lens/config.json` with valid `lens_path` and `log_path`
 
-**US-2 (plugin). Run the loop.** As a worker agent, I want to invoke the runner with (lens, area, round, deliverable key, files, prior findings) and get a verdict so simple issues resolve without the human.
+**US-2 (plugin). Run the loop.** As a worker agent, I want to invoke the runner with (round, deliverable key, files, prior findings, optional lens_path) and get a verdict so simple issues resolve without the human.
 Acceptance:
 - [ ] runner reply contains verdict `PASS`/`FIX`/`ESCALATE` and findings matching §7.3 output shape
 - [ ] every finding cites a `check` slug from the lens vocabulary (F2.3)
-- [ ] with `vault_root` unreachable, runner replies `LENS UNAVAILABLE: <path>` and produces no findings
+- [ ] with `lens_path` unreachable, runner replies `LENS UNAVAILABLE: <path>` and produces no findings
 
 **US-3 (plugin). Enforcement.** As a lens owner, I want a turn that wrote watched files blocked at its Stop-hook firing until a lens run is logged, so the loop cannot be silently skipped.
 Acceptance:
@@ -149,7 +132,7 @@ Acceptance:
 - [ ] install script registers the Cursor lens subagent (`~/.cursor/agents/`) and merges the `stop` hook into `~/.cursor/hooks.json`; `/lens-doctor` validates both (F5.3)
 - [ ] the Cursor subagent reviews per §7.3 and logs per §7.1 with `host: "cursor"`
 - [ ] the Cursor `stop` hook returns `followup_message` when watched writes lack a session `lens_run` (bounded by `loop_limit`; F5.2) and appends `hook_check` with `host: "cursor"`
-- [ ] the vault is readable from the Cursor sandbox (`sandbox.json` `additionalReadonlyPaths`, written by the install script; F5.3)
+- [ ] the lens file is readable from the Cursor sandbox (`sandbox.json` `additionalReadonlyPaths` for its parent dir; F5.3)
 
 Deferred stories (deck card fetch, Codex host, correction-capture automation): see §10.
 
@@ -160,15 +143,15 @@ Deferred stories (deck card fetch, Codex host, correction-capture automation): s
 | Req | Requirement | Acceptance |
 | --- | --- | --- |
 | F1.1 | Private git repo is a Claude Code plugin marketplace: `.claude-plugin/marketplace.json` + plugin `lens` with `agents/`, `hooks/`, `commands/` | US-1 install steps pass on macOS |
-| F1.2 | Config resolves env `LENS_VAULT_ROOT` → `~/.lens/config.json` (§7.4) → error with setup instructions | `/lens-doctor` reports the resolved source |
+| F1.2 | Config resolves env `LENS_PATH`+`LENS_LOG_PATH` → `~/.lens/config.json` (§7.4) → error with setup instructions | `/lens-doctor` reports the resolved source |
 | F1.3 | All hook/command scripts are Python 3 stdlib-only | `grep`-verifiable: no third-party imports |
 
 ### F2 — Runner agent
 
 | Req | Requirement | Acceptance |
 | --- | --- | --- |
-| F2.1 | Plugin ships the runner as `agents/lens.md`, semantics identical to the proven v0 agent, with vault paths replaced by config resolution (F1.2) | US-2 acceptance; diff vs v0 shows only path/config changes |
-| F2.2 | Runner reads `Direction/Lenses/<lens>.md` under `vault_root` at invocation time; lens file is the single source of truth (input shape §7.5) | editing the lens changes the next run's checks with no plugin change |
+| F2.1 | Plugin ships the runner as `agents/lens.md`, semantics identical to the proven v0 agent, with hard-coded paths replaced by config resolution (F1.2) | US-2 acceptance; diff vs v0 shows only path/config changes |
+| F2.2 | Runner reads `lens_path` (or worker override) at invocation time; lens file is the single source of truth (input shape §7.5) | editing the lens changes the next run's checks with no plugin change |
 | F2.3 | The canonical per-lens slug list lives in the runner agent file (the vocabulary's home in the plugin release); a new slug is minted only when a finding fires on a check with no slug in the list — whether newly added to the lens or previously uncovered — after grepping the run log for an existing one | no two slugs for one lens question across the pilot log |
 | F2.4 | Terminal-round logging per §7.1; non-terminal rounds never log | US-4 acceptance |
 
@@ -185,9 +168,9 @@ Deferred stories (deck card fetch, Codex host, correction-capture automation): s
 
 | Req | Requirement | Acceptance |
 | --- | --- | --- |
-| F4.1 | Log lives at `<vault_root>/Metadata/usage/lens_runs.jsonl`; append-only; created on first write | 100% of pilot writes are single-line appends (NFR-2) |
+| F4.1 | Log lives at config `log_path`; append-only; created on first write | 100% of pilot writes are single-line appends (NFR-2) |
 | F4.2 | `/lens-close` command appends a §7.2 record; refuses a deliverable key with no `lens_run` | US-5 acceptance |
-| F4.3 | `/lens-doctor` validates: config resolvable, vault reachable, lens file parses per §7.5, log writable, hook registered | exits non-zero with a named failing check |
+| F4.3 | `/lens-doctor` validates: config resolvable, lens file parses per §7.5, log writable, hook registered | exits non-zero with a named failing check |
 
 ### F5 — Cursor support
 
@@ -195,7 +178,7 @@ Deferred stories (deck card fetch, Codex host, correction-capture automation): s
 | --- | --- | --- |
 | F5.1 | Repo ships the Cursor lens subagent (`cursor/agents/lens.md`, `readonly: true`) — same semantics as F2.1 in Cursor's subagent format | US-6 acceptance; diff vs the plugin runner shows only host-format changes |
 | F5.2 | Cursor `stop` hook mirrors F3 semantics via `followup_message` (bounded continuation, `loop_limit` default 5 — accepted per the feasibility evaluation); appends `hook_check` with `host` | US-6 acceptance |
-| F5.3 | One install script configures Cursor: subagent, `hooks.json` merge, `sandbox.json` vault read path; both hosts resolve the same `~/.lens/config.json` (§7.4) | `/lens-doctor` green covers both hosts |
+| F5.3 | One install script configures Cursor: subagent, `hooks.json` merge, `sandbox.json` lens-dir read path; both hosts resolve the same `~/.lens/config.json` (§7.4) | `/lens-doctor` green covers both hosts |
 | F5.4 | Hook check logic is one shared Python implementation with two host entry points | grep-verifiable: no duplicated check logic between hosts |
 
 ## 5. Pricing model
@@ -217,12 +200,11 @@ All schemas are JSON Schema Draft 2020-12. Contracts directory in the plugin rep
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "lens_run.schema.json",
   "type": "object",
-  "required": ["ts", "event", "lens", "area", "deliverable", "rounds", "verdict", "findings", "escalations"],
+  "required": ["ts", "event", "lens", "deliverable", "rounds", "verdict", "findings", "escalations"],
   "properties": {
     "ts": { "type": "string", "format": "date-time" },
     "event": { "const": "lens_run" },
-    "lens": { "type": "string" },
-    "area": { "type": "string" },
+    "lens": { "type": "string", "description": "absolute lens file path used for this run" },
     "deliverable": { "type": "string", "minLength": 1 },
     "rounds": { "type": "integer", "minimum": 1 },
     "verdict": { "enum": ["pass", "escalated"] },
@@ -291,8 +273,7 @@ Input:
   "type": "object",
   "required": ["round", "deliverable"],
   "properties": {
-    "lens": { "type": "string", "description": "falls back to config default_lens" },
-    "area": { "type": "string", "description": "falls back to config default_area" },
+    "lens_path": { "type": "string", "description": "optional absolute path override; default is config lens_path" },
     "round": { "type": "integer", "minimum": 1 },
     "deliverable": { "type": "string", "description": "stable key; identical across rounds" },
     "files": { "type": "array", "items": { "type": "string" } },
@@ -315,11 +296,10 @@ Output: verdict `PASS | FIX | ESCALATE`; findings and escalations exactly as the
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "config.schema.json",
   "type": "object",
-  "required": ["vault_root"],
+  "required": ["lens_path", "log_path"],
   "properties": {
-    "vault_root": { "type": "string", "description": "absolute path to the knowledge base holding Direction/Lenses/ and Metadata/usage/" },
-    "default_lens": { "type": "string", "description": "stem of Direction/Lenses/<name>.md when the worker omits lens" },
-    "default_area": { "type": "string", "description": "area tag when the worker omits area" },
+    "lens_path": { "type": "string", "description": "absolute path to the lens markdown file" },
+    "log_path": { "type": "string", "description": "absolute path to the append-only lens_runs.jsonl file" },
     "enforce": { "type": "boolean", "default": true },
     "watch_globs": {
       "type": "array",
@@ -334,7 +314,7 @@ Output: verdict `PASS | FIX | ESCALATE`; findings and escalations exactly as the
 
 ### 7.5 Lens file input shape (opinionated — the runner never infers)
 
-A lens is a markdown file at `<vault_root>/Direction/Lenses/<lens>.md`. Required, in this order: YAML frontmatter; `## Core principle`; `## When To Run This`; `## Process` — free prose or numbered prelude steps allowed, then one or more bold `**<Check block>?**` question blocks of bullet checks, optionally a closing `Finish:` line; `## Failure-Mode Guards`. Additional sections (an H1 title, `## Stable priors`, …) are allowed and ignored by validation. Every slug maps to exactly one Process bullet, but not every bullet carries a slug; a finding that fires on an uncovered check mints one per F2.3. The canonical slug list lives in the runner agent file (F2.3). A file missing `## Process` or containing no check block fails `/lens-doctor` (F4.3) and the runner declines it at invocation. Shape verified against the canonical `Direction/Lenses/<lens>.md`.
+A lens is a markdown file at an absolute path (`lens_path`). Required, in this order: YAML frontmatter; `## Core principle`; `## When To Run This`; `## Process` — free prose or numbered prelude steps allowed, then one or more bold `**<Check block>?**` question blocks of bullet checks, optionally a closing `Finish:` line; `## Failure-Mode Guards`. Additional sections (an H1 title, `## Stable priors`, …) are allowed and ignored by validation. Every slug maps to exactly one Process bullet, but not every bullet carries a slug; a finding that fires on an uncovered check mints one per F2.3. The canonical slug list lives in the runner agent file (F2.3). A file missing `## Process` or containing no check block fails `/lens-doctor` (F4.3) and the runner declines it at invocation. Shape verified against any file matching this structure (see `tests/fixtures/sample_lens.md`).
 
 ### 7.6 `hook_check` record (appended by the Stop hook, F3.4)
 
@@ -363,7 +343,7 @@ Shares the run-log file; analyses select by `event`, so the newest-record-per-de
 ## 8. Technical constraints & preferences
 
 - Hosts in the plugin release: Claude Code (plugin marketplace format) and Cursor (user-level subagent + `hooks.json`, installed by the F5.3 script). Codex: Appendix B only.
-- Python 3 stdlib only for hooks/commands (F1.3); no network calls anywhere in the plugin release — the lens is a local file, sync rides the vault's existing git.
+- Python 3 stdlib only for hooks/commands (F1.3); no network calls anywhere in the plugin release — the lens is a local file; sync is the owner's choice (git, sync disk, etc.).
 - macOS is the only supported OS in the plugin release.
 - Private GitHub repo; install auth = existing git credentials.
 - Codegen consumption: this document is copied to `docs/PRD.md` in the plugin repo; repo `CLAUDE.md` points agents at it and at `contracts/`; the existing v0 agent file (`~/.claude/agents/lens.md`) is the canonical reference implementation for F2.1.
@@ -404,7 +384,7 @@ Owner for all milestones: lens owner (side project).
 
 | Question | Default if undecided | Owner |
 | --- | --- | --- |
-| Multiple vaults on one machine? | plugin release: one `vault_root`; per-project override via `LENS_VAULT_ROOT` | lens owner |
+| Multiple lenses on one machine? | plugin release: one `lens_path` + `log_path`; override via `LENS_PATH`/`LENS_LOG_PATH` | lens owner |
 | Does the hook watch code files too? | plugin release: no — `watch_globs` defaults target documents; code review stays with existing tools | lens owner |
 | Cursor install scope? | user-level (`~/.cursor/`), not per-project — standards are personal, not per-repo | lens owner |
 
@@ -421,8 +401,8 @@ Owner for all milestones: lens owner (side project).
 | Source | Captured as |
 | --- | --- |
 | [[Sources/Ideas/personal/2026-07-30 Buddy-agent experiment — lens runner brief]] | §7.1/§7.2 record shapes' origin, known v0 gap, dedupe rule |
-| v0 runner (`~/.claude/agents/lens.md`) + run log (`Metadata/usage/lens_runs.jsonl`) | F2 semantics, §7.1 field shapes as logged in practice |
-| `Direction/Lenses/<lens>.md` | lens input shape (§7.5), slug vocabulary |
+| v0 runner (`~/.claude/agents/lens.md`) + run log (owner filepath) | F2 semantics, §7.1 field shapes as logged in practice |
+| lens markdown file | lens input shape (§7.5), slug vocabulary |
 | AI-Codegen PRD Scaffold (`pb_prd_scaffold`, product deck) | PRD section structure, contracts/NFR/open-decision conventions |
 | Cursor & Codex feasibility section (above, with doc URLs) | F5 mechanisms; Appendix B port sketch |
 
