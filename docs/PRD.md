@@ -6,7 +6,7 @@ status: refining
 
 # Lens — personal review standards for AI agents (product idea + plugin PRD)
 
-> **Canonical home:** this file lives in the `lens` plugin repo (`docs/PRD.md`). Implementation note (2026-08-01): Cursor support uses the native `.cursor-plugin/` marketplace (Team Marketplace / local import), not a hand-merge into `~/.cursor/`; F5.3’s install-script wording is superseded. Doctor still merges configured lens directories into `~/.cursor/sandbox.json` `additionalReadonlyPaths`.
+> **Canonical home:** this file is `docs/PRD.md` in the lens plugin repo. Contracts in `contracts/` must match §7. As-built notes that supersede earlier draft wording are folded into the Req tables below (dual marketplace packaging; named multi-lens config; no Lexicon vault/`area` concepts).
 
 > **One-line:** professionals working with AI agents spend their review time on issues that are simple *for them*; a lens — their review standards as a runnable, versioned file — lets agents resolve those issues among themselves before human review, and turns every correction into a permanent standard instead of a repeated conversation.
 
@@ -36,7 +36,7 @@ status: refining
 
 | Piece | Observed need it answers |
 | --- | --- |
-| **Lens file** — versioned review protocol, human-owned, per person / task family | corrections repeated 5+ times because they had nowhere to live |
+| **Named lens files** — versioned review protocols, human-owned, one or more names per machine (`lenses` / `lenses_dir`) | corrections repeated 5+ times because they had nowhere to live; different task families need different standards |
 | **Runner** — reviewer agent that executes the lens in a loop until pass or escalate | 105 of 109 findings resolved without the human |
 | **Correction capture** — live corrections and history mining become proposed criteria | taste is not discoverable by the reviewer; it converges via feedback |
 | **Run log + analytics** — every run recorded, joined with the human's final review | retrospective and log disagreed (15/13 recalled vs 14/11 logged at the time); only the log made the discrepancy detectable and resolvable |
@@ -45,7 +45,7 @@ status: refining
 ## Deployment path (personal need first)
 
 1. **Now:** file-based v0 — lens as a local markdown file, runner as a local agent file, one laptop.
-2. **Next: one private repo — Claude Code plugin + Cursor support** — any laptop, one install command per host; lens root configurable. Spec: the plugin PRD below.
+2. **Next: one private repo — Claude Code plugin + Cursor plugin** — any laptop, one install per host; named lenses configured in `~/.lens/config.json`. Spec: the plugin PRD below.
 3. **Then:** lens as an Agent Deck card — per-business lens switching via deck binding; Codex reached through the existing deck MCP + stub machinery (feasibility evaluated below).
 
 ## Positioning
@@ -78,7 +78,7 @@ Implementation half (scaffold: pb_prd_scaffold). Everything above is the framing
 
 ## 1. Product overview
 
-Scope: package the proven v0 loop (runner agent + lens file + run log) into one private repo that installs on any machine — a Claude Code plugin and Cursor support (subagent + hooks, **desktop IDE**; the CLI surface is excluded, §10) sharing config, contracts, and the run log — so the loop cannot be silently skipped on either host's covered surface. Codex: out of scope, port sketch in Appendix B.
+Scope: package the proven v0 loop (runner agent + named lens files + run log) into one private repo that installs on any machine — a Claude Code plugin (`.claude-plugin/`) and a Cursor plugin (`.cursor-plugin/`, **desktop IDE**; the CLI surface is excluded, §10) sharing config, contracts, and the run log — so the loop cannot be silently skipped on either host's covered surface. Codex: out of scope, port sketch in Appendix B.
 
 **Success criteria (evaluated at M3 — seven days after hook activation):** plugin installed and passing `/lens-doctor` on 2 laptops; Stop-hook enforcement active on both hosts (Cursor: desktop IDE); ≥ 90% of `hook_check` records with `watched_writes=true` also have `lens_run_found=true` (§7.6, measurement window per §9, min 10 such records, both hosts pooled); ≥ 1 `lens_run` logged from Cursor (`host: "cursor"`); ≥ 5 deliverables carry `human_review` lines.
 
@@ -88,9 +88,9 @@ Primary persona: a product lead who produces documents, decks, and specs through
 
 | Role | Goal | Plugin surface |
 | --- | --- | --- |
-| Lens owner (human) | Standards enforced everywhere; final review only | lens file path; `/lens-close`; `/lens-doctor` |
+| Lens owner (human) | Standards enforced everywhere; final review only | named lenses in `~/.lens/config.json`; `/lens-close`; `/lens-doctor`; `lens add\|list\|remove` |
 | Worker agent | Pass the lens loop before surfacing a deliverable | `lens` subagent invocation contract (§7.3), Claude Code and Cursor |
-| Runner (`lens` subagent) | Execute the lens; report FIX/ESCALATE/PASS; log terminal rounds | plugin agent (Claude Code) / `.cursor` subagent (Cursor) + run log (§7.1) |
+| Runner (`lens` subagent) | Execute a named lens; report FIX/ESCALATE/PASS; log terminal rounds | `agents/lens.md` (Claude Code) / `agents/cursor/lens.md` (Cursor) + run log (§7.1) |
 
 "I am a product lead / I want my correction standards enforced by agents themselves / I use Lens because corrections that don't compound cost me the ~12-round baseline (Problem, above)." Voice rules: use *lens, runner, worker, finding, run* — never introduce a synonym; "buddy" is allowed as informal alias in prose, never in contracts.
 
@@ -104,15 +104,23 @@ Acceptance:
 - [ ] a new session lists the `lens` agent
 - [ ] `/lens-doctor` exits green after writing `~/.lens/config.json` with named `lenses` (or `lenses_dir`), `default_lens`, and `log_path`
 
-**US-2 (plugin). Run the loop.** As a worker agent, I want to invoke the runner with (lens name, round, deliverable key, files, prior findings) and get a verdict so simple issues resolve without the human.
+**US-2 (plugin). Run the loop.** As a worker agent, I want to invoke the runner with a lens **name** (plus round, deliverable key, files, prior findings) and get a verdict so simple issues resolve without the human.
 Acceptance:
 - [ ] runner reply contains verdict `PASS`/`FIX`/`ESCALATE` and findings matching §7.3 output shape
 - [ ] every finding cites a `check` slug from the lens vocabulary (F2.3)
-- [ ] with an unknown lens name or unreadable lens file, runner replies `LENS UNAVAILABLE: <path>` and produces no findings
+- [ ] omitting `lens` uses config `default_lens`
+- [ ] with an unknown lens name or unreadable lens file, runner replies `LENS UNAVAILABLE: <name or path>` and produces no findings
+
+**US-2b (plugin). Manage named lenses.** As a lens owner, I want to register multiple lenses once (or gradually) and invoke them by name.
+Acceptance:
+- [ ] `~/.lens/config.json` supports `lenses` (name → absolute path) and optional `lenses_dir` (§7.4)
+- [ ] `python -m lens_lib lens add|list|remove` updates / lists the map
+- [ ] a name present only as `<lenses_dir>/<name>.md` resolves without a map entry
+- [ ] logged `lens_run.lens` is the **name**, not the file path
 
 **US-3 (plugin). Enforcement.** As a lens owner, I want a turn that wrote watched files blocked at its Stop-hook firing until a lens run is logged, so the loop cannot be silently skipped.
 Acceptance:
-- [ ] the Stop-hook firing blocks (exit 2, message names the missing step) when the session has written files matching `watch_globs` (anchoring per §7.4) and the log has no `lens_run` with `ts` ≥ the transcript's first-event time
+- [ ] the Stop-hook firing blocks (exit 2, message names the missing step) when the session has written files matching `watch_globs` (fnmatch against cwd-relative and absolute paths; never `~/.claude/` or system temp — §7.4) and the log has no `lens_run` with `ts` ≥ the transcript's first-event time
 - [ ] the firing passes when such a `lens_run` exists, when no watched files were written, or when `enforce=false`
 - [ ] every firing appends a `hook_check` record (§7.6)
 - [ ] false-block rate meets NFR-3 (evaluated at M3, over the §9 window)
@@ -129,10 +137,10 @@ Acceptance:
 
 **US-6 (plugin). Same loop in Cursor.** As a lens owner, I want the identical loop and enforcement when I work in Cursor's desktop IDE (the CLI surface is excluded — §10).
 Acceptance:
-- [ ] install script registers the Cursor lens subagent (`~/.cursor/agents/`) and merges the `stop` hook into `~/.cursor/hooks.json`; `/lens-doctor` validates both (F5.3)
+- [ ] Cursor plugin install (Team Marketplace / local import of `.cursor-plugin/`) loads the lens subagent and `stop` / `afterFileEdit` hooks; `/lens-doctor` validates both (F5.3)
 - [ ] the Cursor subagent reviews per §7.3 and logs per §7.1 with `host: "cursor"`
 - [ ] the Cursor `stop` hook returns `followup_message` when watched writes lack a session `lens_run` (bounded by `loop_limit`; F5.2) and appends `hook_check` with `host: "cursor"`
-- [ ] configured lens directories are readable from the Cursor sandbox (`sandbox.json` `additionalReadonlyPaths`; F5.3)
+- [ ] configured lens directories are readable from the Cursor sandbox (`sandbox.json` `additionalReadonlyPaths`, written/merged by `/lens-doctor`; F5.3)
 
 Deferred stories (deck card fetch, Codex host, correction-capture automation): see §10.
 
@@ -142,24 +150,25 @@ Deferred stories (deck card fetch, Codex host, correction-capture automation): s
 
 | Req | Requirement | Acceptance |
 | --- | --- | --- |
-| F1.1 | Private git repo is a Claude Code plugin marketplace: `.claude-plugin/marketplace.json` + plugin `lens` with `agents/`, `hooks/`, `commands/` | US-1 install steps pass on macOS |
-| F1.2 | Config resolves `~/.lens/config.json` (env `LENS_LOG_PATH` / `LENS_DEFAULT` overrides) → error with setup instructions | `/lens-doctor` reports the resolved source |
+| F1.1 | Private git repo is a dual marketplace: `.claude-plugin/marketplace.json` + `.cursor-plugin/marketplace.json`, each offering plugin `lens` with agents, hooks, commands | US-1 / US-6 install paths pass on macOS |
+| F1.2 | Config is `~/.lens/config.json` (§7.4): named `lenses` and/or `lenses_dir`, `default_lens`, `log_path`; env `LENS_LOG_PATH` / `LENS_DEFAULT` override log path / default name → else error with setup instructions | `/lens-doctor` reports source, default, and known names |
 | F1.3 | All hook/command scripts are Python 3 stdlib-only | `grep`-verifiable: no third-party imports |
+| F1.4 | Named-lens management CLI: `python -m lens_lib lens add\|list\|remove` | US-2b acceptance |
 
 ### F2 — Runner agent
 
 | Req | Requirement | Acceptance |
 | --- | --- | --- |
-| F2.1 | Plugin ships the runner as `agents/lens.md`, semantics identical to the proven v0 agent, with hard-coded paths replaced by config resolution (F1.2) | US-2 acceptance; diff vs v0 shows only path/config changes |
-| F2.2 | Runner resolves lens **name** → file path at invocation time; lens file is the single source of truth (input shape §7.5) | editing the lens changes the next run's checks with no plugin change |
-| F2.3 | The canonical per-lens slug list lives in the runner agent file (the vocabulary's home in the plugin release); a new slug is minted only when a finding fires on a check with no slug in the list — whether newly added to the lens or previously uncovered — after grepping the run log for an existing one | no two slugs for one lens question across the pilot log |
-| F2.4 | Terminal-round logging per §7.1; non-terminal rounds never log | US-4 acceptance |
+| F2.1 | Plugin ships runners as `agents/lens.md` (Claude Code) and `agents/cursor/lens.md` (Cursor), semantics identical to the proven v0 agent with hard-coded paths replaced by name→path resolution (F1.2) | US-2 acceptance |
+| F2.2 | Runner resolves lens **name** → file path (`lenses` map, else `lenses_dir/<name>.md`) at invocation time; that file is the single source of truth (input shape §7.5) | editing the lens file changes the next run's checks with no plugin change; switching names selects a different file |
+| F2.3 | The bundled check-slug vocabulary lives in the runner agent file; a new slug is minted only when a finding fires on a check with no slug in the list — whether newly added to the lens or previously uncovered — after grepping the run log for an existing one | no two slugs for one lens question across the pilot log |
+| F2.4 | Terminal-round logging per §7.1 (`lens` = name); non-terminal rounds never log | US-4 acceptance |
 
 ### F3 — Enforcement (Stop hook)
 
 | Req | Requirement | Acceptance |
 | --- | --- | --- |
-| F3.1 | The Stop hook fires at each turn end with the session transcript path; it detects session writes matching `watch_globs` (anchoring per §7.4) and checks the log for a `lens_run` with `ts` ≥ the transcript's first-event time | US-3 acceptance |
+| F3.1 | The Stop hook fires at each turn end with the session transcript path; it detects session writes matching `watch_globs` (§7.4 matching rules) and checks `log_path` for a `lens_run` with `ts` ≥ the transcript's first-event time | US-3 acceptance |
 | F3.2 | Block message tells the worker exactly what to do (invoke `lens` agent, deliverable key convention) | message contains the §7.3 invocation template |
 | F3.3 | `enforce=false` in config disables blocking but the hook still emits a one-line warning | toggling requires no reinstall |
 | F3.4 | Every firing appends a `hook_check` record (§7.6) to the run log, including its own `duration_ms` | §1 criterion 3, NFR-3, and NFR-4 are computable from the log alone |
@@ -170,16 +179,16 @@ Deferred stories (deck card fetch, Codex host, correction-capture automation): s
 | --- | --- | --- |
 | F4.1 | Log lives at config `log_path`; append-only; created on first write | 100% of pilot writes are single-line appends (NFR-2) |
 | F4.2 | `/lens-close` command appends a §7.2 record; refuses a deliverable key with no `lens_run` | US-5 acceptance |
-| F4.3 | `/lens-doctor` validates: config resolvable, lens file parses per §7.5, log writable, hook registered | exits non-zero with a named failing check |
+| F4.3 | `/lens-doctor` validates: config resolvable, every known named lens parses per §7.5, log writable, host hooks present, Cursor sandbox roots for lens directories | exits non-zero with a named failing check |
 
 ### F5 — Cursor support
 
 | Req | Requirement | Acceptance |
 | --- | --- | --- |
-| F5.1 | Repo ships the Cursor lens subagent (`cursor/agents/lens.md`, `readonly: true`) — same semantics as F2.1 in Cursor's subagent format | US-6 acceptance; diff vs the plugin runner shows only host-format changes |
-| F5.2 | Cursor `stop` hook mirrors F3 semantics via `followup_message` (bounded continuation, `loop_limit` default 5 — accepted per the feasibility evaluation); appends `hook_check` with `host` | US-6 acceptance |
-| F5.3 | One install script configures Cursor: subagent, `hooks.json` merge, `sandbox.json` lens-dir read path; both hosts resolve the same `~/.lens/config.json` (§7.4) | `/lens-doctor` green covers both hosts |
-| F5.4 | Hook check logic is one shared Python implementation with two host entry points | grep-verifiable: no duplicated check logic between hosts |
+| F5.1 | Repo ships the Cursor lens subagent (`agents/cursor/lens.md`, `readonly: true`) via `.cursor-plugin/` — same semantics as F2.1 in Cursor's subagent format | US-6 acceptance; diff vs the Claude runner shows only host-format changes |
+| F5.2 | Cursor `stop` hook mirrors F3 semantics via `followup_message` (bounded continuation, `loop_limit` default 5 — accepted per the feasibility evaluation); `afterFileEdit` records writes for detection; appends `hook_check` with `host` | US-6 acceptance |
+| F5.3 | Cursor install is the `.cursor-plugin/` marketplace import (Team Marketplace / local); `/lens-doctor` merges lens directories into `~/.cursor/sandbox.json` `additionalReadonlyPaths`; both hosts resolve the same `~/.lens/config.json` (§7.4) | `/lens-doctor` green covers both hosts |
+| F5.4 | Hook check logic is one shared Python implementation (`lens_lib.check`) with two host entry points | grep-verifiable: no duplicated check logic between hosts |
 
 ## 5. Pricing model
 
@@ -291,6 +300,8 @@ Output: verdict `PASS | FIX | ESCALATE`; findings and escalations exactly as the
 
 ### 7.4 `~/.lens/config.json`
 
+Name resolution order for a lens name: (1) `lenses[name]` if present; (2) else `<lenses_dir>/<name>.md` if that file exists; (3) else unknown. `default_lens` is used when the worker omits `lens`. Env overrides: `LENS_LOG_PATH`, `LENS_DEFAULT`.
+
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -298,10 +309,23 @@ Output: verdict `PASS | FIX | ESCALATE`; findings and escalations exactly as the
   "type": "object",
   "required": ["log_path", "default_lens"],
   "properties": {
-    "lenses": { "type": "object", "additionalProperties": { "type": "string" }, "description": "name → absolute .md path" },
-    "lenses_dir": { "type": "string", "description": "optional; unresolved names map to <dir>/<name>.md" },
-    "default_lens": { "type": "string", "description": "name used when the worker omits lens" },
-    "log_path": { "type": "string", "description": "absolute path to the append-only lens_runs.jsonl file" },
+    "lenses": {
+      "type": "object",
+      "description": "map of kebab-case lens name → absolute path to a .md lens file",
+      "additionalProperties": { "type": "string" }
+    },
+    "lenses_dir": {
+      "type": "string",
+      "description": "optional directory; names not in `lenses` resolve to <lenses_dir>/<name>.md"
+    },
+    "default_lens": {
+      "type": "string",
+      "description": "lens name used when the worker omits lens"
+    },
+    "log_path": {
+      "type": "string",
+      "description": "absolute path to the append-only lens_runs.jsonl file"
+    },
     "enforce": { "type": "boolean", "default": true },
     "watch_globs": {
       "type": "array",
@@ -344,11 +368,12 @@ Shares the run-log file; analyses select by `event`, so the newest-record-per-de
 
 ## 8. Technical constraints & preferences
 
-- Hosts in the plugin release: Claude Code (plugin marketplace format) and Cursor (user-level subagent + `hooks.json`, installed by the F5.3 script). Codex: Appendix B only.
-- Python 3 stdlib only for hooks/commands (F1.3); no network calls anywhere in the plugin release — the lens is a local file; sync is the owner's choice (git, sync disk, etc.).
+- Hosts in the plugin release: Claude Code (`.claude-plugin/` marketplace) and Cursor (`.cursor-plugin/` marketplace — Team Marketplace / local import; desktop IDE). Codex: Appendix B only.
+- Python 3 stdlib only for hooks/commands (F1.3); no network calls anywhere in the plugin release — lens bodies are local files; sync is the owner's choice (git, sync disk, etc.).
+- No Lexicon/`vault`/`area` concepts in config or contracts — only named lenses, absolute file paths, and `log_path`.
 - macOS is the only supported OS in the plugin release.
-- Private GitHub repo; install auth = existing git credentials.
-- Codegen consumption: this document is copied to `docs/PRD.md` in the plugin repo; repo `CLAUDE.md` points agents at it and at `contracts/`; the existing v0 agent file (`~/.claude/agents/lens.md`) is the canonical reference implementation for F2.1.
+- Private GitHub repo preferred; install auth = existing git credentials.
+- Codegen consumption: this document **is** `docs/PRD.md`; repo `CLAUDE.md` points agents at it and at `contracts/`; the historical v0 agent (`~/.claude/agents/lens.md`) was the reference for the first port (F2.1) — the in-repo runners are now canonical.
 
 ## 9. Non-functional requirements
 
@@ -376,7 +401,7 @@ Dependency order, no calendar estimates — the build is expected to land in abo
 
 | Milestone | Exit criteria |
 | --- | --- |
-| M1 — build (laptop 1) | Repo + plugin skeleton; runner ported (F2); config + `/lens-doctor` (F1.2, F4.3); Stop hook active (F3); Cursor support installed (F5) — US-1, US-2, US-6, and US-3's functional boxes (all but the NFR-3 rate) pass |
+| M1 — build (laptop 1) | Repo + dual marketplace skeleton; named-lens config + runners (F1–F2); `/lens-doctor` (F4.3); Stop/`stop` hooks (F3/F5); Cursor plugin path (F5) — US-1, US-2, US-2b, US-6, and US-3's functional boxes (all but the NFR-3 rate) pass |
 | M2 — deploy (laptop 2) | `/lens-close` (F4.2); install both hosts on laptop 2; US-4 + US-5 acceptance pass |
 | M3 — pilot readout | Seven days of real usage after M1 hook activation: §1 success criteria and all §9 NFRs evaluated over their stated windows |
 
@@ -384,19 +409,19 @@ Owner for all milestones: lens owner (side project).
 
 ## 12. Open decisions
 
-| Question | Default if undecided | Owner |
+| Question | Status / default | Owner |
 | --- | --- | --- |
-| Multiple lenses on one machine? | plugin release: named `lenses` map and/or `lenses_dir`; one shared `log_path` | lens owner |
+| Multiple lenses on one machine? | **Decided** — named `lenses` map and/or `lenses_dir`; one shared `log_path`; invoke by name (F1.2, F1.4, US-2b) | lens owner |
 | Does the hook watch code files too? | plugin release: no — `watch_globs` defaults target documents; code review stays with existing tools | lens owner |
-| Cursor install scope? | user-level (`~/.cursor/`), not per-project — standards are personal, not per-repo | lens owner |
+| Cursor install mechanism? | **Decided** — `.cursor-plugin/` marketplace (Team Marketplace / local import); doctor merges sandbox readonly roots (F5.3). Not a hand-merge into `~/.cursor/agents` | lens owner |
 
 (Session identification and the slug vocabulary's home were open in draft; both are now specified — F3.1 and F2.3.)
 
 ## 13. How to use this document
 
-- **Human (lens owner):** the product half (above the divider) carries the Decision and open questions; in the PRD, review §1 success criteria and §12 defaults — everything else is implementation.
-- **AI codegen:** load `docs/PRD.md`; implement one Req at a time in F-number order; check acceptance boxes as you verify; use §7 schemas verbatim (copy into `contracts/`); when a choice isn't specified, pick the minimum that satisfies the acceptance box; §10 is a hard stop-list.
-- **Reference implementation:** the working v0 runner at `~/.claude/agents/lens.md` — port, don't reinvent (F2.1).
+- **Human (lens owner):** the product half (above the divider) carries the Decision and open questions; in the PRD, review §1 success criteria and §12 — everything else is implementation.
+- **AI codegen:** load `docs/PRD.md`; implement one Req at a time in F-number order; check acceptance boxes as you verify; keep `contracts/` identical to §7; when a choice isn't specified, pick the minimum that satisfies the acceptance box; §10 is a hard stop-list.
+- **Reference implementation:** in-repo `agents/lens.md` and `agents/cursor/lens.md` plus `python/lens_lib/` — do not reinvent contracts.
 
 ## Appendix A — source notes
 
@@ -410,4 +435,4 @@ Owner for all milestones: lens owner (side project).
 
 ## Appendix B — Codex port sketch (out of scope for this release)
 
-Feasibility: strong on CLI/desktop, evaluated 2026-08-01 (section above, with citations). A future port needs, mirroring F2/F3/F4: a reviewer subagent at `~/.codex/agents/lens.toml` (`sandbox_mode = "read-only"`, `developer_instructions` pointing at the lens path); a `Stop` hook returning `{"decision": "block"}` running the same shared check logic (F5.4's third entry point); `writable_roots` (or hook-side append) for the run log with `host: "codex"` added to the §7.1/§7.6 enums; lens read is unrestricted, no config needed. Blocked surface: the IDE extension (hooks undocumented). Not built now because the pilot measures two hosts first; the shared-logic design (F5.4) keeps the port to roughly one TOML file plus one hooks entry.
+Feasibility: strong on CLI/desktop, evaluated 2026-08-01 (section above, with citations). A future port needs, mirroring F2/F3/F4: a reviewer subagent at `~/.codex/agents/lens.toml` (`sandbox_mode = "read-only"`, `developer_instructions` resolving named lenses via the same `~/.lens/config.json`); a `Stop` hook returning `{"decision": "block"}` running the same shared check logic (F5.4's third entry point); `writable_roots` (or hook-side append) for `log_path` with `host: "codex"` added to the §7.1/§7.6 enums. Blocked surface: the IDE extension (hooks undocumented). Not built now because the pilot measures two hosts first; the shared-logic design (F5.4) keeps the port to roughly one TOML file plus one hooks entry.
