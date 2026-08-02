@@ -107,14 +107,17 @@ def _validate_hook_commands(
                 if not p.is_file():
                     problems.append(f"script missing after expand: {token}")
 
+    joined = " ".join(commands)
     for rel in required_scripts:
         target = plugin_root / rel
         if not target.is_file():
             problems.append(f"expected script missing: {target}")
+        if Path(rel).name not in joined:
+            problems.append(f"no hook command wired for {Path(rel).name}")
 
     if problems:
         return False, f"{host}: " + "; ".join(problems)
-    return True, f"{host}: {hooks_file} commands use {required_var} and scripts exist"
+    return True, f"{host}: {hooks_file} commands wire {required_var} scripts"
 
 
 def _hooks_registered_claude(plugin_root: Optional[Path]) -> tuple[bool, str]:
@@ -127,7 +130,10 @@ def _hooks_registered_claude(plugin_root: Optional[Path]) -> tuple[bool, str]:
             hooks_file=hooks,
             plugin_root=plugin_root,
             required_var="CLAUDE_PLUGIN_ROOT",
-            required_scripts=["python/claude_stop.py"],
+            required_scripts=[
+                "python/claude_stop.py",
+                "python/claude_user_prompt.py",
+            ],
         )
     marketplaces = claude_home() / "plugins" / "marketplaces"
     if marketplaces.is_dir():
@@ -138,7 +144,10 @@ def _hooks_registered_claude(plugin_root: Optional[Path]) -> tuple[bool, str]:
                 hooks_file=p,
                 plugin_root=root,
                 required_var="CLAUDE_PLUGIN_ROOT",
-                required_scripts=["python/claude_stop.py"],
+                required_scripts=[
+                    "python/claude_stop.py",
+                    "python/claude_user_prompt.py",
+                ],
             )
     return False, "Claude hooks not found (install lens plugin)"
 

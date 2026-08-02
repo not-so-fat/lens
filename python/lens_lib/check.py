@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from .config import Config, ConfigError, resolve_config
 from .log import (
@@ -19,6 +20,7 @@ from .transcript import gather_writes, prune_sidechannel_file, session_id_from_t
 from .util import (
     INVOCATION_TEMPLATE,
     conversation_workspace_writes_path,
+    session_armed_path,
     session_writes_path,
     utc_now_iso,
     workspace_writes_path,
@@ -36,10 +38,90 @@ class CheckResult:
     host: str
     message: str
     watched_paths: List[str]
+    armed: bool = False
 
 
 def _real_ids(ids: List[str]) -> List[str]:
     return [i for i in ids if i and i != "unknown"]
+
+
+# --- Explicit-invocation arming (I-9) ------------------------------------
+# A chat deliverable never writes a watched file, so the write-triggered gate
+# cannot catch "use <lens>". When the user explicitly asks for the lens, a
+# UserPromptSubmit hook arms the session; the Stop hook then blocks until a
+# lens_run is logged, regardless of writes.
+
+# Negations / hedges that flip an otherwise-matching phrase ("don't use the lens").
+# The contraction alternative requires the apostrophe so ordinary words ending in
+# "nt" (want, important, current, different) are NOT treated as negations.
+_NEG_RE = re.compile(
+    r"(?:\b(?:no|not|never|without|avoid|skip|cannot)\b|\binstead\s+of\b|n['’]t\b)",
+    re.IGNORECASE,
+)
+_VERB = r"use|using|run|running|apply|applying|invoke|execute|redo\w*"
+
+
+def _negated_before(text: str, idx: int) -> bool:
+    return _NEG_RE.search(text[max(0, idx - 20):idx]) is not None
+
+
+def is_lens_invocation(prompt: str, known_names: Sequence[str] = ()) -> bool:
+    """
+    True if the prompt explicitly and affirmatively asks to run the lens.
+
+    Rejects negations/hedges ("don't use the lens", "without using the lens")
+    and unrelated senses ("eyeglasses lens metaphor", "lens documentation").
+    """
+    if not isinstance(prompt, str) or not prompt:
+        return False
+    # `(?!)` never matches — so name-based patterns are inert when no names.
+    name_alt = "|".join(re.escape(n) for n in known_names if n) or r"(?!)"
+    patterns = (
+        r"\blens\s*=\s*\S",
+        rf"\b(?:{_VERB})\s+(?:the\s+|(?:{name_alt})\s+)?lens\b",
+        r"\blens\s+(?:loop|review)\b",
+        rf"\bwith\s+(?:{name_alt})\s+lens\b",
+        rf"\b(?:{_VERB})\s+(?:with\s+|the\s+)?(?:{name_alt})\b",
+        rf"\b(?:{name_alt})\s+lens\b",
+    )
+    for pat in patterns:
+        for m in re.finditer(pat, prompt, re.IGNORECASE):
+            if not _negated_before(prompt, m.start()):
+                return True
+    return False
+
+
+def arm_session(session: str, *, ts: Optional[str] = None, reason: str = "explicit-invocation") -> None:
+    """Mark a session as requiring a lens_run before it may stop."""
+    if not session or session == "unknown":
+        return
+    path = session_armed_path(session)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"{ts or utc_now_iso()}\t{reason}\n", encoding="utf-8")
+
+
+def read_arm_ts(session: str) -> Optional[str]:
+    """Return the arm timestamp for a session, or None if not armed."""
+    if not session or session == "unknown":
+        return None
+    path = session_armed_path(session)
+    if not path.is_file():
+        return None
+    try:
+        first = path.read_text(encoding="utf-8", errors="replace").strip().splitlines()[0]
+    except (OSError, IndexError):
+        return None
+    ts = first.split("\t", 1)[0].strip()
+    return ts or None
+
+
+def disarm_session(session: str) -> None:
+    if not session:
+        return
+    try:
+        session_armed_path(session).unlink()
+    except OSError:
+        pass
 
 
 def run_check(
@@ -139,23 +221,44 @@ def run_check(
         lens_run_found = True
         gate = "session"
 
-    should_block = bool(cfg.enforce and watched_writes and not lens_run_found)
-    if not watched_writes:
-        message = ""
-    elif lens_run_found:
+    # Explicit-invocation arming (I-9): the user asked for the lens; require a
+    # lens_run for this session regardless of watched writes.
+    armed_ts: Optional[str] = None
+    for sid in real:
+        a = read_arm_ts(sid)
+        if a and (armed_ts is None or a < armed_ts):
+            armed_ts = a
+    armed = armed_ts is not None
+    armed_satisfied = False
+    if armed:
+        armed_satisfied = has_lens_run_for_sessions(
+            cfg.log_path, real, since_iso=armed_ts, allow_untagged=bool(transcript_path)
+        )
+        if armed_satisfied:
+            # A lens_run for this session was found — keep lens_run_found/gate
+            # consistent (gate="session" must not pair with lens_run_found=false).
+            lens_run_found = True
+            if gate == "none":
+                gate = "session"
+
+    block_writes = watched_writes and not lens_run_found
+    block_armed = armed and not armed_satisfied
+    should_block = bool(cfg.enforce and (block_writes or block_armed))
+
+    sess_hint = (
+        f" Ensure the lens_run includes session={session!r} "
+        "(or omit session only on Claude Bash appends)."
+        if host == "claude-code"
+        else f" Ensure the lens_run includes session={session!r}."
+    )
+    if not (block_writes or block_armed):
         message = ""
     elif not cfg.enforce:
         message = (
-            "Warning: watched deliverable writes in this session have no lens_run "
-            f"(enforce=false). {INVOCATION_TEMPLATE}"
+            "Warning: this session has a pending lens review "
+            f"(enforce=false).{sess_hint} {INVOCATION_TEMPLATE}"
         )
-    else:
-        sess_hint = (
-            f" Ensure the lens_run includes session={session!r} "
-            "(or omit session only on Claude Bash appends)."
-            if host == "claude-code"
-            else f" Ensure the lens_run includes session={session!r}."
-        )
+    elif block_writes:
         message = (
             "Lens enforcement: this session wrote watched files but no matching "
             f"lens_run was logged at or after the session start ({first_ts or 'unknown'})."
@@ -164,6 +267,17 @@ def run_check(
             f"Watched writes: {', '.join(watched[:8])}"
             + ("…" if len(watched) > 8 else "")
         )
+    else:
+        message = (
+            "Lens enforcement: you invoked the lens for this session but no matching "
+            f"lens_run has been logged since you asked ({armed_ts})."
+            f"{sess_hint} {INVOCATION_TEMPLATE}"
+        )
+
+    # A satisfied arm is consumed so later chat turns are not re-blocked.
+    if armed and armed_satisfied:
+        for sid in real:
+            disarm_session(sid)
 
     # Prune consumed side-channel lines after a satisfying run (Cursor).
     if lens_run_found and not transcript_path:
@@ -191,6 +305,7 @@ def run_check(
         "session_ids": ids,
         "watched_writes": watched_writes,
         "wrote_watched": wrote_watched,
+        "armed": armed,
         "lens_run_found": lens_run_found,
         "blocked": should_block,
         "enforce": cfg.enforce,
@@ -216,6 +331,7 @@ def run_check(
         host=host,
         message=message,
         watched_paths=watched,
+        armed=armed,
     )
 
 

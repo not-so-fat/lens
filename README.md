@@ -56,15 +56,15 @@ New session should list the `lens` agent. Run `/lens-doctor`.
 
 ```bash
 git clone https://github.com/not-so-fat/lens.git /tmp/lens && cd /tmp/lens
-git checkout v0.1.0
+git checkout v0.1.1
 rm -rf ~/.cursor/plugins/local/lens
 mkdir -p ~/.cursor/plugins/local/lens
-git archive v0.1.0 | tar -x -C ~/.cursor/plugins/local/lens
+git archive v0.1.1 | tar -x -C ~/.cursor/plugins/local/lens
 ```
 
 Then **Developer: Reload Window**, open any workspace, run `/lens-doctor`.
 
-**Team Marketplace:** Cursor → Customize → Plugins → Import marketplace → `https://github.com/not-so-fat/lens` (or pin the `v0.1.0` tag), install `lens`, reload, `/lens-doctor`.
+**Team Marketplace:** Cursor → Customize → Plugins → Import marketplace → `https://github.com/not-so-fat/lens` (or pin the `v0.1.1` tag), install `lens`, reload, `/lens-doctor`.
 
 Hook commands use `${CURSOR_PLUGIN_ROOT}` (plugin install dir), **not** `./python/...` relative to your project. You do **not** copy hook scripts into each workspace — one plugin install covers every folder you open.
 
@@ -97,6 +97,12 @@ On a terminal round it appends one `lens_run` (field `lens` = name) to `log_path
 ```text
 /lens-close "my-deliverable-key" corrections=0
 ```
+
+### Chat deliverables & explicit invocation
+
+Enforcement normally fires on writes to `watch_globs` files. A deliverable produced **in the chat** (analysis, comparison, summary) writes no file, so the write gate can't see it. But on **Claude Code**, when you **explicitly ask for the lens** — e.g. `use yusuke lens`, `lens=deck`, `run the lens`, `with yusuke lens` — a `UserPromptSubmit` hook **arms** the session: the Stop hook then blocks until a `lens_run` is logged for it, **regardless of writes**. So an explicit request is enforced for chat work too, and disarms once the run lands. (Negated/hedged mentions — "don't use the lens" — do not arm.)
+
+Not yet on **Cursor** (no prompt-submit arming wired — tracked in [`docs/ISSUES.md`](docs/ISSUES.md) I-9); and a chat deliverable you did *not* explicitly flag is still not auto-enforced on either host. Set `"enforce": false` to pause all blocking.
 
 ## Doctor
 

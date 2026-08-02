@@ -18,6 +18,7 @@ PYTHON = ROOT / "python"
 sys.path.insert(0, str(PYTHON))
 from lens_lib.util import utc_now_iso  # noqa: E402
 CLAUDE_STOP = PYTHON / "claude_stop.py"
+CLAUDE_PROMPT = PYTHON / "claude_user_prompt.py"
 CURSOR_STOP = PYTHON / "cursor_stop.py"
 CURSOR_EDIT = PYTHON / "cursor_after_file_edit.py"
 
@@ -274,6 +275,114 @@ class HookIntegrationTests(unittest.TestCase):
         rec = json.loads(self.log.read_text(encoding="utf-8").strip().splitlines()[-1])
         self.assertFalse(rec["blocked"])
         self.assertTrue(rec["lens_run_found"])
+
+    def _transcript_no_write(self, name: str = "chat.jsonl", sid: str = "sess-1") -> Path:
+        t = self.td / name
+        t.write_text(
+            json.dumps(
+                {
+                    "type": "user",
+                    "timestamp": "2026-08-01T10:00:00.000Z",
+                    "cwd": str(self.td),
+                    "sessionId": sid,
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return t
+
+    def test_claude_explicit_invocation_arms_and_blocks_without_writes(self):
+        """I-9: 'use <lens>' on a chat turn (no watched write) must still enforce a lens_run."""
+        prompt = _run_hook(
+            CLAUDE_PROMPT,
+            {"prompt": "run the lens on this", "session_id": "sess-1", "cwd": str(self.td)},
+            self.env,
+        )
+        self.assertEqual(prompt.returncode, 0, prompt.stderr)
+        transcript = self._transcript_no_write()
+        stop = _run_hook(
+            CLAUDE_STOP,
+            {"transcript_path": str(transcript), "session_id": "sess-1", "cwd": str(self.td)},
+            self.env,
+        )
+        self.assertEqual(stop.returncode, 2, stop.stderr)  # blocked despite no writes
+        rec = json.loads(self.log.read_text(encoding="utf-8").strip().splitlines()[-1])
+        self.assertTrue(rec["armed"])
+        self.assertTrue(rec["blocked"])
+        self.assertFalse(rec["wrote_watched"])
+        # A session-tagged lens_run satisfies the arm; the next stop passes and disarms.
+        with self.log.open("a", encoding="utf-8") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "ts": utc_now_iso(),
+                        "event": "lens_run",
+                        "lens": "review",
+                        "deliverable": "chat-answer",
+                        "rounds": 1,
+                        "verdict": "pass",
+                        "host": "claude-code",
+                        "session": "sess-1",
+                        "findings": [],
+                        "escalations": [],
+                    }
+                )
+                + "\n"
+            )
+        stop2 = _run_hook(
+            CLAUDE_STOP,
+            {"transcript_path": str(transcript), "session_id": "sess-1", "cwd": str(self.td)},
+            self.env,
+        )
+        self.assertEqual(stop2.returncode, 0, stop2.stderr)
+        # The arm is consumed: a later chat turn is not re-blocked and records armed=false.
+        stop3 = _run_hook(
+            CLAUDE_STOP,
+            {"transcript_path": str(transcript), "session_id": "sess-1", "cwd": str(self.td)},
+            self.env,
+        )
+        self.assertEqual(stop3.returncode, 0, stop3.stderr)
+        rec3 = json.loads(self.log.read_text(encoding="utf-8").strip().splitlines()[-1])
+        self.assertFalse(rec3["armed"])
+        self.assertFalse(rec3["blocked"])
+
+    def test_claude_armed_with_enforce_false_warns_not_blocks(self):
+        """enforce=false must not block an armed session, but still records armed=true."""
+        _write_config(self.home, self.lens, self.log, enforce=False)
+        _run_hook(
+            CLAUDE_PROMPT,
+            {"prompt": "run the lens on this", "session_id": "sess-e", "cwd": str(self.td)},
+            self.env,
+        )
+        transcript = self._transcript_no_write("chat_e.jsonl", "sess-e")
+        stop = _run_hook(
+            CLAUDE_STOP,
+            {"transcript_path": str(transcript), "session_id": "sess-e", "cwd": str(self.td)},
+            self.env,
+        )
+        self.assertEqual(stop.returncode, 0, stop.stderr)  # not blocked (enforce=false)
+        rec = json.loads(self.log.read_text(encoding="utf-8").strip().splitlines()[-1])
+        self.assertTrue(rec["armed"])
+        self.assertFalse(rec["blocked"])
+
+    def test_claude_non_lens_prompt_does_not_arm(self):
+        """A normal prompt must not arm — no false blocks on chat turns."""
+        _run_hook(
+            CLAUDE_PROMPT,
+            {"prompt": "compare two companies and summarize", "session_id": "sess-2", "cwd": str(self.td)},
+            self.env,
+        )
+        transcript = self._transcript_no_write("chat2.jsonl", "sess-2")
+        stop = _run_hook(
+            CLAUDE_STOP,
+            {"transcript_path": str(transcript), "session_id": "sess-2", "cwd": str(self.td)},
+            self.env,
+        )
+        self.assertEqual(stop.returncode, 0, stop.stderr)
+        rec = json.loads(self.log.read_text(encoding="utf-8").strip().splitlines()[-1])
+        self.assertFalse(rec["armed"])
+        self.assertFalse(rec["blocked"])
 
     def test_cursor_after_file_edit_then_stop_blocks(self):
         """Cursor stop often has little transcript — sidechannel is the critical path."""

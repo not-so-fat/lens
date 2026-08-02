@@ -37,3 +37,18 @@ Not automatable from unittest. Manual smoke in README (“Manual Cursor smoke”
 - **Cursor:** side-channel writes **after** the latest session-tagged `lens_run` are enforced again; consumed lines are pruned. Closes the “second deliverable in same chat slips” hole for Cursor without full deliverable-key plumbing.
 
 Full deliverable-key scoping on both hosts remains optional post-pilot.
+
+### I-9 — explicit lens invocation on a chat deliverable is now enforced (was: unenforced)
+
+The write-triggered Stop gate only fires on writes to `watch_globs` files. A deliverable produced **in the chat** (analysis, comparison, summary — no file written) does not trip it. That is fine for passive coverage, but it broke an **explicit** request: when the user typed *"use yusuke lens"* on a chat task, nothing enforced it — the loop fell back to convention (the agent voluntarily complying), which is exactly what F3 exists to replace.
+
+Verified live (session `9b1ecf4e-edf5-4a40-be0c-85f3155dc075`, run log):
+
+- Chat-research turns 04:04–04:28 — `wrote_watched=false`, nothing blocked. The user asked *"use Yusuke lens"* / *"Redo research with yusuke lens"* here; nothing ran (the reported "lens is not working").
+- Once a markdown deliverable was written (04:39) the write gate **did** engage: `blocked=true` at 04:39 and 04:44, a `lens_run` logged at 04:45, then `blocked=false`. So the write path worked — the gap was strictly the chat phase, where an explicit invocation had no enforcement hook.
+
+**Fix (this release, Claude Code): arm-on-explicit-invocation.** A `UserPromptSubmit` hook (`python/claude_user_prompt.py`) detects an explicit, **affirmative** request (`use`/`run`/`apply`/`using`/`with <lens>`, `lens=<name>`, `run the lens`, or a configured lens name) and **arms** the session (`~/.lens/sessions/<session>/armed.txt`). The detector rejects negations/hedges (`don't use the lens`, `without using the lens`, `use my eyeglasses lens metaphor`). `run_check` (shared by both hosts) then blocks an armed session until a `lens_run` is logged **regardless of watched writes**, and disarms once one lands. `hook_check` gains an `armed` field. So an explicit opt-in is a hard gate for chat deliverables too — no separate manual command to remember (that would be the same convention trap).
+
+**Cursor: not yet armed (follow-up).** `run_check` already honors `armed`, but only Claude's `UserPromptSubmit` writes the marker. Cursor arming needs a `beforeSubmitPrompt` entry mirroring `claude_user_prompt.py`; deferred until it can be verified on the desktop IDE (cf. I-4). Until then, Cursor enforces only the write-triggered gate.
+
+**Still by-spec:** a chat deliverable with **no** explicit invocation is not auto-enforced (the write gate can't see it, and firing the lens on every Stop is noisy). Passive coverage of chat work stays a post-pilot question. Related blind spot unchanged: files written via a **Bash redirect / `tee`** are invisible to `written_paths_from_transcript` (structured `Write`/`Edit`/`NotebookEdit` only).

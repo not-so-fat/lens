@@ -31,6 +31,10 @@
       "type": "boolean",
       "description": "session had any watched-path writes (ignores after_ts); used for M3 success metric"
     },
+    "armed": {
+      "type": "boolean",
+      "description": "session was armed by an explicit lens invocation (Claude Code UserPromptSubmit; Cursor arming is a follow-up, I-9); blocks until a lens_run regardless of writes"
+    },
     "lens_run_found": { "type": "boolean" },
     "blocked": { "type": "boolean" },
     "enforce": { "type": "boolean" },

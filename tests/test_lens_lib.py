@@ -355,5 +355,54 @@ class PreReleaseFootgunTests(unittest.TestCase):
         self.assertTrue(matches_glob("docs/a/b.md", "docs/**/*.md"))
 
 
+class LensInvocationDetectionTests(unittest.TestCase):
+    """I-9: detect an explicit 'use the lens' request (the incident phrasings)."""
+
+    def test_positive_phrasings(self):
+        from lens_lib.check import is_lens_invocation
+
+        for p in [
+            "use Yusuke lens",
+            "Redo research with yusuke lens",
+            "let's summarize this as a markdown, focus on A2A, use yusuke lens",
+            "run the lens loop on these files",
+            "lens=deck",
+            "apply the lens review before you finish",
+            # affirmative phrasing whose words end in "nt" must still arm
+            "I want you to use the lens",
+            "The important step: use the lens",
+            "current task: run the lens",
+            "different approach — use the lens",
+        ]:
+            self.assertTrue(is_lens_invocation(p, ["yusuke", "deck"]), p)
+
+    def test_negative_phrasings(self):
+        from lens_lib.check import is_lens_invocation
+
+        for p in [
+            "compare arkhai and cfex with Kite, summarize differences",
+            "clearly lens is not working, I need to report",
+            "give me the session ID",
+            # negations / hedges must not arm (would hard-block Stop)
+            "don't use the lens",
+            "can't use the lens",
+            "won't run the lens",
+            "do not run the lens",
+            "without using the lens",
+            "with care, finish the lens documentation",
+            "use my eyeglasses lens metaphor",
+            "please don't use yusuke",
+            "instead of the lens, just answer inline",
+            "note: the lens plugin is broken",
+        ]:
+            self.assertFalse(is_lens_invocation(p, ["yusuke", "deck"]), p)
+
+    def test_non_string_prompt_is_safe(self):
+        from lens_lib.check import is_lens_invocation
+
+        self.assertFalse(is_lens_invocation(None, ["yusuke"]))
+        self.assertFalse(is_lens_invocation(["use", "lens"], ["yusuke"]))
+
+
 if __name__ == "__main__":
     unittest.main()
