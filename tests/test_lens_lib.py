@@ -368,6 +368,11 @@ class LensInvocationDetectionTests(unittest.TestCase):
             "run the lens loop on these files",
             "lens=deck",
             "apply the lens review before you finish",
+            # affirmative phrasing whose words end in "nt" must still arm
+            "I want you to use the lens",
+            "The important step: use the lens",
+            "current task: run the lens",
+            "different approach — use the lens",
         ]:
             self.assertTrue(is_lens_invocation(p, ["yusuke", "deck"]), p)
 
@@ -380,6 +385,8 @@ class LensInvocationDetectionTests(unittest.TestCase):
             "give me the session ID",
             # negations / hedges must not arm (would hard-block Stop)
             "don't use the lens",
+            "can't use the lens",
+            "won't run the lens",
             "do not run the lens",
             "without using the lens",
             "with care, finish the lens documentation",

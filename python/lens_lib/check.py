@@ -52,8 +52,10 @@ def _real_ids(ids: List[str]) -> List[str]:
 # lens_run is logged, regardless of writes.
 
 # Negations / hedges that flip an otherwise-matching phrase ("don't use the lens").
+# The contraction alternative requires the apostrophe so ordinary words ending in
+# "nt" (want, important, current, different) are NOT treated as negations.
 _NEG_RE = re.compile(
-    r"(?:\b(?:no|not|never|without|avoid|skip|cannot|instead\s+of)\b|n['’]?t\b)",
+    r"(?:\b(?:no|not|never|without|avoid|skip|cannot)\b|\binstead\s+of\b|n['’]t\b)",
     re.IGNORECASE,
 )
 _VERB = r"use|using|run|running|apply|applying|invoke|execute|redo\w*"

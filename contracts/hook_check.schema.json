@@ -33,7 +33,7 @@
     },
     "armed": {
       "type": "boolean",
-      "description": "session was armed by an explicit lens invocation (UserPromptSubmit); blocks until a lens_run regardless of writes"
+      "description": "session was armed by an explicit lens invocation (Claude Code UserPromptSubmit; Cursor arming is a follow-up, I-9); blocks until a lens_run regardless of writes"
     },
     "lens_run_found": { "type": "boolean" },
     "blocked": { "type": "boolean" },
