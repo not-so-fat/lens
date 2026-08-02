@@ -4,7 +4,7 @@ Lens ships as a **GitHub repo marketplace** (Claude Code + Cursor). There is no 
 
 ## Version fields (keep in sync)
 
-Bump these four together (semver, currently `0.1.0`):
+Bump these four together (semver, currently `0.1.1`):
 
 | File | Field |
 | --- | --- |
@@ -13,7 +13,7 @@ Bump these four together (semver, currently `0.1.0`):
 | `.cursor-plugin/plugin.json` | `version` |
 | `.cursor-plugin/marketplace.json` | `metadata.version` + plugin entry `version` |
 
-Git tag form: `vMAJOR.MINOR.PATCH` (e.g. `v0.1.0`).
+Git tag form: `vMAJOR.MINOR.PATCH` (e.g. `v0.1.1`).
 
 ## Pre-release checklist
 
@@ -38,21 +38,21 @@ git pull origin main
 #    (skip if already bumped in the merge)
 
 # 3. Tag + push
-git tag -a v0.1.0 -m "lens v0.1.0"
-git push origin v0.1.0
+git tag -a v0.1.1 -m "lens v0.1.1"
+git push origin v0.1.1
 
 # 4. GitHub Release (notes for humans / changelog)
-gh release create v0.1.0 --title "v0.1.0" --notes-file - <<'EOF'
-## Lens v0.1.0
+gh release create v0.1.1 --title "v0.1.1" --notes-file - <<'EOF'
+## Lens v0.1.1
 
 First dual-host plugin release (Claude Code + Cursor desktop).
 
 ### Install
 - Claude: `claude plugin marketplace add not-so-fat/lens` then `claude plugin install lens@lens-plugins`
-- Cursor (local, pin tag): `git archive v0.1.0 | tar -x -C ~/.cursor/plugins/local/lens` (after `mkdir -p` that dir), Reload Window, `/lens-doctor`
-- Cursor (Team Marketplace): import `https://github.com/not-so-fat/lens` (pin `v0.1.0`), install `lens`, reload, `/lens-doctor`
+- Cursor (local, pin tag): `git archive v0.1.1 | tar -x -C ~/.cursor/plugins/local/lens` (after `mkdir -p` that dir), Reload Window, `/lens-doctor`
+- Cursor (Team Marketplace): import `https://github.com/not-so-fat/lens` (pin `v0.1.1`), install `lens`, reload, `/lens-doctor`
 
-Pin installs to tag `v0.1.0` when you need a frozen revision. See README “Install — Cursor” for the full copy-paste sequence.
+Pin installs to tag `v0.1.1` when you need a frozen revision. See README “Install — Cursor” for the full copy-paste sequence.
 EOF
 ```
 
