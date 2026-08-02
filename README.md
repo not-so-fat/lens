@@ -98,6 +98,17 @@ On a terminal round it appends one `lens_run` (field `lens` = name) to `log_path
 /lens-close "my-deliverable-key" corrections=0
 ```
 
+### Chat deliverables (write-triggered scope)
+
+Enforcement fires only on writes to `watch_globs` files. A deliverable produced **in the chat** (an analysis, comparison, summary) — or a file written via a Bash redirect rather than the Write tool — never trips the Stop-hook gate, so it is not enforced. Run your lens on it **on demand**:
+
+```text
+/lens-review "my-deliverable-key" [lens=<name>]
+<paste the deliverable, or pass files=…>
+```
+
+This runs the lens and logs a `lens_run`; it does **not** block the turn. Automatic enforcement of chat deliverables is an open question — see [`docs/ISSUES.md`](docs/ISSUES.md) I-9.
+
 ## Doctor
 
 ```text

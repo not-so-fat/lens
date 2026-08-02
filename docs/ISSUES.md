@@ -37,3 +37,13 @@ Not automatable from unittest. Manual smoke in README (“Manual Cursor smoke”
 - **Cursor:** side-channel writes **after** the latest session-tagged `lens_run` are enforced again; consumed lines are pruned. Closes the “second deliverable in same chat slips” hole for Cursor without full deliverable-key plumbing.
 
 Full deliverable-key scoping on both hosts remains optional post-pilot.
+
+### I-9 — write-triggered gate misses chat-only deliverables
+
+Enforcement fires only on writes to `watch_globs` files, so a deliverable produced **in the chat** (analysis, comparison, summary — no file written) never trips the gate and the loop is not enforced.
+
+Verified live (2026-08-02, session `9b1ecf4e-edf5-4a40-be0c-85f3155dc075`): a "compare two companies with Kite" answer used only Bash/Read/WebFetch/WebSearch — **0 Write/Edit calls**. All four `hook_check` records show `wrote_watched=false`, nothing blocked, and the `lens` agent was never invoked. The plugin behaved exactly as designed; the design has no hook into chat-delivered work.
+
+**Related blind spot:** files written via a **Bash redirect / heredoc / `tee`** are also invisible — `written_paths_from_transcript` only scans structured `Write` / `Edit` / `NotebookEdit` tool events.
+
+**Mitigation this release:** `/lens-review` (`commands/lens-review.md`) — a manual trigger to run the lens on a chat deliverable and log a `lens_run`; it does **not** block. Automatic enforcement of chat deliverables (turn-based firing, or a "is this a deliverable" heuristic) is deferred: firing on every Stop is noisy, and the honest first step is to collect pilot data on how often chat deliverables matter before adding heuristics.
