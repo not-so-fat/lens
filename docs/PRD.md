@@ -69,7 +69,7 @@ Agent Deck is context switching; a lens is judgment that must travel with that c
 - **Resolved for the plugin release by exclusion (§10); reopens at the deck card** — per-surface enforcement gaps: Cursor CLI (hook delivery unreliable) is excluded from the plugin release; the Codex IDE extension (hooks undocumented) remains a deck-card question; the run log's skip rate is the evidence to collect.
 - **Shapes the plugin step, worth arguing** — privacy: lenses encode work context; multi-laptop sync must stay private (private repo suffices? deck sync changes the answer).
 - **Blocks nothing yet** — team lenses: can a team share standards the way one person does, and who reviews the reviewer?
-- **Shapes the plugin's coverage, worth arguing** — enforcement scope: the Stop-hook gate is write-triggered, so chat-delivered work (and files written via Bash rather than the Write tool) bypasses it entirely (see [`docs/ISSUES.md`](ISSUES.md) I-9). `/lens-review` gives a manual path; automatic coverage without false-blocking every chat turn is unresolved — pilot skip data is the evidence to collect.
+- **Shapes the plugin's coverage, worth arguing** — enforcement scope: the Stop-hook gate is write-triggered. An **explicit** request (*"use yusuke lens"*) on a chat deliverable is now enforced via `UserPromptSubmit` arming (see [`docs/ISSUES.md`](ISSUES.md) I-9). Still open: **passive** coverage of chat work the user did not explicitly flag — firing the lens on every Stop is noisy, so pilot skip data is the evidence to collect. Files written via Bash (not the Write tool) also remain invisible.
 
 Implementation residuals from Cursor hook regression work (session-id / workspace side-channel, relative hook cwd, live desktop E2E): see [`docs/ISSUES.md`](ISSUES.md).
 

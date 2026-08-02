@@ -46,6 +46,12 @@ def session_writes_path(session: str) -> Path:
     return expand_path("~/.lens/sessions") / session / "writes.txt"
 
 
+def session_armed_path(session: str) -> Path:
+    """Explicit-invocation arm marker keyed by session id (I-9)."""
+    safe = session.replace("/", "_").replace("\\", "_")
+    return expand_path("~/.lens/sessions") / safe / "armed.txt"
+
+
 def conversation_workspace_writes_path(workspace_root: str, conversation_id: str) -> Path:
     """Primary Cursor side-channel: (workspace, conversation_id)."""
     key = _workspace_key(workspace_root)

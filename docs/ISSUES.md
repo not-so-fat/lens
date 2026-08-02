@@ -38,12 +38,15 @@ Not automatable from unittest. Manual smoke in README (“Manual Cursor smoke”
 
 Full deliverable-key scoping on both hosts remains optional post-pilot.
 
-### I-9 — write-triggered gate misses chat-only deliverables
+### I-9 — explicit lens invocation on a chat deliverable is now enforced (was: unenforced)
 
-Enforcement fires only on writes to `watch_globs` files, so a deliverable produced **in the chat** (analysis, comparison, summary — no file written) never trips the gate and the loop is not enforced.
+The write-triggered Stop gate only fires on writes to `watch_globs` files. A deliverable produced **in the chat** (analysis, comparison, summary — no file written) does not trip it. That is fine for passive coverage, but it broke an **explicit** request: when the user typed *"use yusuke lens"* on a chat task, nothing enforced it — the loop fell back to convention (the agent voluntarily complying), which is exactly what F3 exists to replace.
 
-Verified live (2026-08-02, session `9b1ecf4e-edf5-4a40-be0c-85f3155dc075`): a "compare two companies with Kite" answer used only Bash/Read/WebFetch/WebSearch — **0 Write/Edit calls**. All four `hook_check` records show `wrote_watched=false`, nothing blocked, and the `lens` agent was never invoked. The plugin behaved exactly as designed; the design has no hook into chat-delivered work.
+Verified live (session `9b1ecf4e-edf5-4a40-be0c-85f3155dc075`, run log):
 
-**Related blind spot:** files written via a **Bash redirect / heredoc / `tee`** are also invisible — `written_paths_from_transcript` only scans structured `Write` / `Edit` / `NotebookEdit` tool events.
+- Chat-research turns 04:04–04:28 — `wrote_watched=false`, nothing blocked. The user asked *"use Yusuke lens"* / *"Redo research with yusuke lens"* here; nothing ran (the reported "lens is not working").
+- Once a markdown deliverable was written (04:39) the write gate **did** engage: `blocked=true` at 04:39 and 04:44, a `lens_run` logged at 04:45, then `blocked=false`. So the write path worked — the gap was strictly the chat phase, where an explicit invocation had no enforcement hook.
 
-**Mitigation this release:** `/lens-review` (`commands/lens-review.md`) — a manual trigger to run the lens on a chat deliverable and log a `lens_run`; it does **not** block. Automatic enforcement of chat deliverables (turn-based firing, or a "is this a deliverable" heuristic) is deferred: firing on every Stop is noisy, and the honest first step is to collect pilot data on how often chat deliverables matter before adding heuristics.
+**Fix (this release): arm-on-explicit-invocation.** A `UserPromptSubmit` hook (`python/claude_user_prompt.py`) detects an explicit request (`use <lens>` / `lens=<name>` / `run the lens` / `with <lens>`, plus any configured lens name) and **arms** the session (`~/.lens/sessions/<session>/armed.txt`). `run_check` then blocks that session until a `lens_run` is logged **regardless of watched writes**, and disarms once one lands. `hook_check` gains an `armed` field. So an explicit opt-in is a hard gate for chat deliverables too — no separate manual command to remember (that would be the same convention trap).
+
+**Still by-spec:** a chat deliverable with **no** explicit invocation is not auto-enforced (the write gate can't see it, and firing the lens on every Stop is noisy). Passive coverage of chat work stays a post-pilot question. Related blind spot unchanged: files written via a **Bash redirect / `tee`** are invisible to `written_paths_from_transcript` (structured `Write`/`Edit`/`NotebookEdit` only).

@@ -355,5 +355,32 @@ class PreReleaseFootgunTests(unittest.TestCase):
         self.assertTrue(matches_glob("docs/a/b.md", "docs/**/*.md"))
 
 
+class LensInvocationDetectionTests(unittest.TestCase):
+    """I-9: detect an explicit 'use the lens' request (the incident phrasings)."""
+
+    def test_positive_phrasings(self):
+        from lens_lib.check import is_lens_invocation
+
+        for p in [
+            "use Yusuke lens",
+            "Redo research with yusuke lens",
+            "let's summarize this as a markdown, focus on A2A, use yusuke lens",
+            "run the lens loop on these files",
+            "lens=deck",
+            "apply the lens review before you finish",
+        ]:
+            self.assertTrue(is_lens_invocation(p, ["yusuke", "deck"]), p)
+
+    def test_negative_phrasings(self):
+        from lens_lib.check import is_lens_invocation
+
+        for p in [
+            "compare arkhai and cfex with Kite, summarize differences",
+            "clearly lens is not working, I need to report",
+            "give me the session ID",
+        ]:
+            self.assertFalse(is_lens_invocation(p, ["yusuke"]), p)
+
+
 if __name__ == "__main__":
     unittest.main()

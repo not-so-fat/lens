@@ -98,16 +98,11 @@ On a terminal round it appends one `lens_run` (field `lens` = name) to `log_path
 /lens-close "my-deliverable-key" corrections=0
 ```
 
-### Chat deliverables (write-triggered scope)
+### Chat deliverables & explicit invocation
 
-Enforcement fires only on writes to `watch_globs` files. A deliverable produced **in the chat** (an analysis, comparison, summary) — or a file written via a Bash redirect rather than the Write tool — never trips the Stop-hook gate, so it is not enforced. Run your lens on it **on demand**:
+Enforcement normally fires on writes to `watch_globs` files. A deliverable produced **in the chat** (analysis, comparison, summary) writes no file, so the write gate can't see it. But when you **explicitly ask for the lens** — e.g. `use yusuke lens`, `lens=deck`, `run the lens`, `with <lens>` — a `UserPromptSubmit` hook **arms** the session: the Stop hook then blocks until a `lens_run` is logged for it, **regardless of writes**. So an explicit request is enforced for chat work too, and disarms once the run lands.
 
-```text
-/lens-review "my-deliverable-key" [lens=<name>]
-<paste the deliverable, or pass files=…>
-```
-
-This runs the lens and logs a `lens_run`; it does **not** block the turn. Automatic enforcement of chat deliverables is an open question — see [`docs/ISSUES.md`](docs/ISSUES.md) I-9.
+A chat deliverable you did *not* explicitly flag is still not auto-enforced (the write gate can't see it; see [`docs/ISSUES.md`](docs/ISSUES.md) I-9). Set `"enforce": false` to pause all blocking.
 
 ## Doctor
 

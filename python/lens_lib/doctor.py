@@ -127,7 +127,10 @@ def _hooks_registered_claude(plugin_root: Optional[Path]) -> tuple[bool, str]:
             hooks_file=hooks,
             plugin_root=plugin_root,
             required_var="CLAUDE_PLUGIN_ROOT",
-            required_scripts=["python/claude_stop.py"],
+            required_scripts=[
+                "python/claude_stop.py",
+                "python/claude_user_prompt.py",
+            ],
         )
     marketplaces = claude_home() / "plugins" / "marketplaces"
     if marketplaces.is_dir():
@@ -138,7 +141,10 @@ def _hooks_registered_claude(plugin_root: Optional[Path]) -> tuple[bool, str]:
                 hooks_file=p,
                 plugin_root=root,
                 required_var="CLAUDE_PLUGIN_ROOT",
-                required_scripts=["python/claude_stop.py"],
+                required_scripts=[
+                "python/claude_stop.py",
+                "python/claude_user_prompt.py",
+            ],
             )
     return False, "Claude hooks not found (install lens plugin)"
 
