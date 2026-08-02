@@ -105,5 +105,60 @@ class DoctorTests(unittest.TestCase):
                     os.environ["HOME"] = old_home
 
 
+class HookWiringTests(unittest.TestCase):
+    """Doctor must catch an unwired hook script, not just a missing file."""
+
+    def test_missing_userpromptsubmit_command_fails(self):
+        from lens_lib.doctor import _validate_hook_commands
+
+        with tempfile.TemporaryDirectory(dir=str(ROOT)) as td_s:
+            hooks = Path(td_s) / "claude-hooks.json"
+            hooks.write_text(
+                json.dumps(
+                    {
+                        "hooks": {
+                            "Stop": [
+                                {
+                                    "hooks": [
+                                        {
+                                            "type": "command",
+                                            "command": 'python3 "${CLAUDE_PLUGIN_ROOT}/python/claude_stop.py"',
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                )
+            )
+            ok, detail = _validate_hook_commands(
+                host="claude",
+                hooks_file=hooks,
+                plugin_root=ROOT,
+                required_var="CLAUDE_PLUGIN_ROOT",
+                required_scripts=[
+                    "python/claude_stop.py",
+                    "python/claude_user_prompt.py",
+                ],
+            )
+            self.assertFalse(ok, detail)
+            self.assertIn("claude_user_prompt.py", detail)
+
+    def test_shipped_claude_hooks_fully_wired(self):
+        from lens_lib.doctor import _validate_hook_commands
+
+        ok, detail = _validate_hook_commands(
+            host="claude",
+            hooks_file=ROOT / "hooks" / "claude-hooks.json",
+            plugin_root=ROOT,
+            required_var="CLAUDE_PLUGIN_ROOT",
+            required_scripts=[
+                "python/claude_stop.py",
+                "python/claude_user_prompt.py",
+            ],
+        )
+        self.assertTrue(ok, detail)
+
+
 if __name__ == "__main__":
     unittest.main()

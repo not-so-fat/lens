@@ -48,7 +48,7 @@ def main() -> int:
         try:
             arm_session(str(session))
         except OSError:
-            pass
+            return 0  # could not arm — do not claim the Stop hook will block
         # stdout from a UserPromptSubmit hook is added to the agent's context.
         print(
             "[lens] Explicit lens invocation detected. Before ending this turn you "

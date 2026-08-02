@@ -296,7 +296,7 @@ class HookIntegrationTests(unittest.TestCase):
         """I-9: 'use <lens>' on a chat turn (no watched write) must still enforce a lens_run."""
         prompt = _run_hook(
             CLAUDE_PROMPT,
-            {"prompt": "use yusuke lens on this", "session_id": "sess-1", "cwd": str(self.td)},
+            {"prompt": "run the lens on this", "session_id": "sess-1", "cwd": str(self.td)},
             self.env,
         )
         self.assertEqual(prompt.returncode, 0, prompt.stderr)
@@ -336,6 +336,35 @@ class HookIntegrationTests(unittest.TestCase):
             self.env,
         )
         self.assertEqual(stop2.returncode, 0, stop2.stderr)
+        # The arm is consumed: a later chat turn is not re-blocked and records armed=false.
+        stop3 = _run_hook(
+            CLAUDE_STOP,
+            {"transcript_path": str(transcript), "session_id": "sess-1", "cwd": str(self.td)},
+            self.env,
+        )
+        self.assertEqual(stop3.returncode, 0, stop3.stderr)
+        rec3 = json.loads(self.log.read_text(encoding="utf-8").strip().splitlines()[-1])
+        self.assertFalse(rec3["armed"])
+        self.assertFalse(rec3["blocked"])
+
+    def test_claude_armed_with_enforce_false_warns_not_blocks(self):
+        """enforce=false must not block an armed session, but still records armed=true."""
+        _write_config(self.home, self.lens, self.log, enforce=False)
+        _run_hook(
+            CLAUDE_PROMPT,
+            {"prompt": "run the lens on this", "session_id": "sess-e", "cwd": str(self.td)},
+            self.env,
+        )
+        transcript = self._transcript_no_write("chat_e.jsonl", "sess-e")
+        stop = _run_hook(
+            CLAUDE_STOP,
+            {"transcript_path": str(transcript), "session_id": "sess-e", "cwd": str(self.td)},
+            self.env,
+        )
+        self.assertEqual(stop.returncode, 0, stop.stderr)  # not blocked (enforce=false)
+        rec = json.loads(self.log.read_text(encoding="utf-8").strip().splitlines()[-1])
+        self.assertTrue(rec["armed"])
+        self.assertFalse(rec["blocked"])
 
     def test_claude_non_lens_prompt_does_not_arm(self):
         """A normal prompt must not arm — no false blocks on chat turns."""

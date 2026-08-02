@@ -378,8 +378,23 @@ class LensInvocationDetectionTests(unittest.TestCase):
             "compare arkhai and cfex with Kite, summarize differences",
             "clearly lens is not working, I need to report",
             "give me the session ID",
+            # negations / hedges must not arm (would hard-block Stop)
+            "don't use the lens",
+            "do not run the lens",
+            "without using the lens",
+            "with care, finish the lens documentation",
+            "use my eyeglasses lens metaphor",
+            "please don't use yusuke",
+            "instead of the lens, just answer inline",
+            "note: the lens plugin is broken",
         ]:
-            self.assertFalse(is_lens_invocation(p, ["yusuke"]), p)
+            self.assertFalse(is_lens_invocation(p, ["yusuke", "deck"]), p)
+
+    def test_non_string_prompt_is_safe(self):
+        from lens_lib.check import is_lens_invocation
+
+        self.assertFalse(is_lens_invocation(None, ["yusuke"]))
+        self.assertFalse(is_lens_invocation(["use", "lens"], ["yusuke"]))
 
 
 if __name__ == "__main__":

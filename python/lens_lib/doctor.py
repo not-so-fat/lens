@@ -107,14 +107,17 @@ def _validate_hook_commands(
                 if not p.is_file():
                     problems.append(f"script missing after expand: {token}")
 
+    joined = " ".join(commands)
     for rel in required_scripts:
         target = plugin_root / rel
         if not target.is_file():
             problems.append(f"expected script missing: {target}")
+        if Path(rel).name not in joined:
+            problems.append(f"no hook command wired for {Path(rel).name}")
 
     if problems:
         return False, f"{host}: " + "; ".join(problems)
-    return True, f"{host}: {hooks_file} commands use {required_var} and scripts exist"
+    return True, f"{host}: {hooks_file} commands wire {required_var} scripts"
 
 
 def _hooks_registered_claude(plugin_root: Optional[Path]) -> tuple[bool, str]:

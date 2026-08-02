@@ -100,9 +100,9 @@ On a terminal round it appends one `lens_run` (field `lens` = name) to `log_path
 
 ### Chat deliverables & explicit invocation
 
-Enforcement normally fires on writes to `watch_globs` files. A deliverable produced **in the chat** (analysis, comparison, summary) writes no file, so the write gate can't see it. But when you **explicitly ask for the lens** — e.g. `use yusuke lens`, `lens=deck`, `run the lens`, `with <lens>` — a `UserPromptSubmit` hook **arms** the session: the Stop hook then blocks until a `lens_run` is logged for it, **regardless of writes**. So an explicit request is enforced for chat work too, and disarms once the run lands.
+Enforcement normally fires on writes to `watch_globs` files. A deliverable produced **in the chat** (analysis, comparison, summary) writes no file, so the write gate can't see it. But on **Claude Code**, when you **explicitly ask for the lens** — e.g. `use yusuke lens`, `lens=deck`, `run the lens`, `with yusuke lens` — a `UserPromptSubmit` hook **arms** the session: the Stop hook then blocks until a `lens_run` is logged for it, **regardless of writes**. So an explicit request is enforced for chat work too, and disarms once the run lands. (Negated/hedged mentions — "don't use the lens" — do not arm.)
 
-A chat deliverable you did *not* explicitly flag is still not auto-enforced (the write gate can't see it; see [`docs/ISSUES.md`](docs/ISSUES.md) I-9). Set `"enforce": false` to pause all blocking.
+Not yet on **Cursor** (no prompt-submit arming wired — tracked in [`docs/ISSUES.md`](docs/ISSUES.md) I-9); and a chat deliverable you did *not* explicitly flag is still not auto-enforced on either host. Set `"enforce": false` to pause all blocking.
 
 ## Doctor
 

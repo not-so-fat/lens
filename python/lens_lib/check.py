@@ -51,30 +51,41 @@ def _real_ids(ids: List[str]) -> List[str]:
 # UserPromptSubmit hook arms the session; the Stop hook then blocks until a
 # lens_run is logged, regardless of writes.
 
-_LENS_INVOKE_RE = re.compile(
-    r"(?:\blens\s*=\s*\S)"
-    r"|(?:\b(?:use|using|run|apply|redo|with|via)\b[^.\n]{0,24}\blens\b)"
-    r"|(?:\blens\b[^.\n]{0,24}\b(?:loop|review)\b)",
+# Negations / hedges that flip an otherwise-matching phrase ("don't use the lens").
+_NEG_RE = re.compile(
+    r"(?:\b(?:no|not|never|without|avoid|skip|cannot|instead\s+of)\b|n['’]?t\b)",
     re.IGNORECASE,
 )
+_VERB = r"use|using|run|running|apply|applying|invoke|execute|redo\w*"
+
+
+def _negated_before(text: str, idx: int) -> bool:
+    return _NEG_RE.search(text[max(0, idx - 20):idx]) is not None
 
 
 def is_lens_invocation(prompt: str, known_names: Sequence[str] = ()) -> bool:
-    """True if the user's prompt explicitly asks to run the lens."""
-    if not prompt:
+    """
+    True if the prompt explicitly and affirmatively asks to run the lens.
+
+    Rejects negations/hedges ("don't use the lens", "without using the lens")
+    and unrelated senses ("eyeglasses lens metaphor", "lens documentation").
+    """
+    if not isinstance(prompt, str) or not prompt:
         return False
-    if _LENS_INVOKE_RE.search(prompt):
-        return True
-    for name in known_names:
-        if not name:
-            continue
-        if re.search(
-            r"\b(?:use|using|run|apply|redo\w*|with|via)\b[^.\n]{0,24}\b"
-            + re.escape(name) + r"\b",
-            prompt,
-            re.IGNORECASE,
-        ):
-            return True
+    # `(?!)` never matches — so name-based patterns are inert when no names.
+    name_alt = "|".join(re.escape(n) for n in known_names if n) or r"(?!)"
+    patterns = (
+        r"\blens\s*=\s*\S",
+        rf"\b(?:{_VERB})\s+(?:the\s+|(?:{name_alt})\s+)?lens\b",
+        r"\blens\s+(?:loop|review)\b",
+        rf"\bwith\s+(?:{name_alt})\s+lens\b",
+        rf"\b(?:{_VERB})\s+(?:with\s+|the\s+)?(?:{name_alt})\b",
+        rf"\b(?:{name_alt})\s+lens\b",
+    )
+    for pat in patterns:
+        for m in re.finditer(pat, prompt, re.IGNORECASE):
+            if not _negated_before(prompt, m.start()):
+                return True
     return False
 
 
@@ -221,8 +232,12 @@ def run_check(
         armed_satisfied = has_lens_run_for_sessions(
             cfg.log_path, real, since_iso=armed_ts, allow_untagged=bool(transcript_path)
         )
-        if armed_satisfied and gate == "none":
-            gate = "session"
+        if armed_satisfied:
+            # A lens_run for this session was found — keep lens_run_found/gate
+            # consistent (gate="session" must not pair with lens_run_found=false).
+            lens_run_found = True
+            if gate == "none":
+                gate = "session"
 
     block_writes = watched_writes and not lens_run_found
     block_armed = armed and not armed_satisfied
