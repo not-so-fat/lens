@@ -618,6 +618,87 @@ class LensInvocationDetectionTests(unittest.TestCase):
         self.assertFalse(is_lens_invocation(["use", "lens"], ["yusuke"]))
 
 
+class LensRunDedupTests(unittest.TestCase):
+    """A spurious gate re-block can prompt the worker to re-log the same terminal
+    run; append-run drops the identical re-append."""
+
+    def _rec(self, **kw):
+        base = {
+            "event": "lens_run", "lens": "review", "deliverable": "d", "rounds": 7,
+            "verdict": "pass", "findings": [], "escalations": [],
+            "session": "s1", "ts": "2026-08-04T18:05:25Z",
+        }
+        base.update(kw)
+        return base
+
+    def test_identity_match_and_boundaries(self):
+        from lens_lib.log import append_record, is_duplicate_lens_run
+
+        with tempfile.TemporaryDirectory() as td:
+            log = Path(td) / "runs.jsonl"
+            append_record(log, self._rec())
+            # same session+deliverable+rounds, later ts -> duplicate
+            self.assertTrue(
+                is_duplicate_lens_run(log, self._rec(ts="2026-08-04T18:06:16Z"))
+            )
+            # next round -> legitimate, not a duplicate
+            self.assertFalse(
+                is_duplicate_lens_run(log, self._rec(rounds=8, ts="2026-08-04T18:10:00Z"))
+            )
+            # different session, same deliverable/round -> not a duplicate
+            self.assertFalse(
+                is_duplicate_lens_run(log, self._rec(session="s2", ts="2026-08-04T18:06:16Z"))
+            )
+
+    def test_untagged_falls_back_to_ts_window(self):
+        from lens_lib.log import append_record, is_duplicate_lens_run
+
+        with tempfile.TemporaryDirectory() as td:
+            log = Path(td) / "runs.jsonl"
+            append_record(log, self._rec(session=None))
+            self.assertTrue(
+                is_duplicate_lens_run(log, self._rec(session=None, ts="2026-08-04T18:06:16Z"))
+            )
+            self.assertFalse(
+                is_duplicate_lens_run(log, self._rec(session=None, ts="2026-08-04T18:30:00Z"))
+            )
+
+    def test_append_run_cli_skips_duplicate(self):
+        with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:
+            lens = Path(td) / "lens.md"
+            lens.write_text(SAMPLE)
+            log = Path(td) / "runs.jsonl"
+            home = Path(td) / "home"
+            home.mkdir()
+            old_home = os.environ.get("HOME")
+            os.environ["HOME"] = str(home)
+            os.environ.pop("LENS_LOG_PATH", None)
+            try:
+                write_config(
+                    str(log), lenses={"review": str(lens)}, default_lens="review"
+                )
+                from lens_lib.__main__ import main
+
+                def rec(ts):
+                    return json.dumps({
+                        "ts": ts, "lens": "review", "deliverable": "d", "rounds": 7,
+                        "verdict": "pass", "findings": [], "escalations": [],
+                    })
+
+                self.assertEqual(main(["append-run", "--host", "claude-code",
+                                       "--session", "s1", "--json", rec("2026-08-04T18:05:25Z")]), 0)
+                self.assertEqual(main(["append-run", "--host", "claude-code",
+                                       "--session", "s1", "--json", rec("2026-08-04T18:06:16Z")]), 0)
+                with open(log) as f:
+                    runs = [json.loads(l) for l in f if json.loads(l).get("event") == "lens_run"]
+                self.assertEqual(len(runs), 1, "identical re-append should be skipped")
+            finally:
+                if old_home is None:
+                    os.environ.pop("HOME", None)
+                else:
+                    os.environ["HOME"] = old_home
+
+
 class ClaudePermissionsTests(unittest.TestCase):
     """The claude-code analog of the Cursor sandbox: pre-grant the runner's
     out-of-workspace Read + append Bash so a background subagent needn't prompt."""
