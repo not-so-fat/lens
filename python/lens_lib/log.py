@@ -160,6 +160,51 @@ def latest_lens_run_ts(
     return latest_raw
 
 
+def is_duplicate_lens_run(
+    log_path: Path, record: Dict[str, Any], *, window_seconds: int = 120
+) -> bool:
+    """
+    True if a terminal lens_run with the same identity was already logged.
+
+    Guards the append path against a redundant re-log: a spurious gate re-block
+    (e.g. an arming re-fire) can prompt the worker to append the *same* run again
+    ~a minute later — same findings, new ts. Identity = same deliverable + rounds
+    and either a shared session id, or — when *both* sides are untagged — the same
+    verdict within window_seconds. Mixed tagged/untagged is never a duplicate
+    (cannot prove they are the same session). Two different sessions reviewing the
+    same deliverable/round are NOT duplicates.
+    """
+    if record.get("event") != "lens_run":
+        return False
+    deliverable = record.get("deliverable")
+    rounds = record.get("rounds")
+    if deliverable is None or rounds is None:
+        return False
+    new_ids = _lens_run_session_ids(record)
+    new_ts = parse_iso_ts(str(record.get("ts") or ""))
+    for rec in iter_records(log_path):
+        if rec.get("event") != "lens_run":
+            continue
+        if rec.get("deliverable") != deliverable or rec.get("rounds") != rounds:
+            continue
+        prev_ids = _lens_run_session_ids(rec)
+        if new_ids and prev_ids:
+            if new_ids & prev_ids:
+                return True
+            continue  # different session, same deliverable/round — not a dup
+        if new_ids or prev_ids:
+            # Exactly one side tagged — cannot equate sessions; not a dup.
+            continue
+        if rec.get("verdict") != record.get("verdict"):
+            continue
+        prev_ts = parse_iso_ts(str(rec.get("ts") or ""))
+        if new_ts is None or prev_ts is None:
+            continue  # unparseable ts — do not over-dedup
+        if abs((new_ts - prev_ts).total_seconds()) <= window_seconds:
+            return True
+    return False
+
+
 def deliverable_has_lens_run(log_path: Path, deliverable: str) -> bool:
     for rec in iter_records(log_path):
         if rec.get("event") == "lens_run" and rec.get("deliverable") == deliverable:

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -236,6 +237,197 @@ class LogAndCheckTests(unittest.TestCase):
                 else:
                     os.environ["HOME"] = old_home
 
+    def test_arm_circuit_breaker_disarms_after_max_blocks(self):
+        """RC3: an unsatisfied arm gives up after ARM_MAX_BLOCKS instead of
+        blocking forever (the 92-blocks-in-10-min runaway)."""
+        with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:
+            lens = Path(td) / "lens.md"
+            log = Path(td) / "runs.jsonl"
+            lens.write_text(SAMPLE)
+            home = Path(td) / "home"
+            home.mkdir()
+            old_home = os.environ.get("HOME")
+            os.environ["HOME"] = str(home)
+            os.environ.pop("LENS_LOG_PATH", None)
+            try:
+                write_config(
+                    str(log),
+                    lenses={"review": str(lens)},
+                    default_lens="review",
+                    enforce=True,
+                )
+                from lens_lib.check import ARM_MAX_BLOCKS, arm_session, read_arm_ts
+
+                sid = "armed-sess"
+                arm_session(sid)
+                # warn-first: the first unsatisfied stop warns without blocking
+                r = run_check(host="cursor", session_id=sid, cwd=td)
+                self.assertFalse(r.blocked, "first stop should warn, not block")
+                self.assertTrue(r.armed)
+                self.assertTrue(r.message)
+                self.assertIsNotNone(read_arm_ts(sid))
+                # then it blocks up to ARM_MAX_BLOCKS times
+                for i in range(ARM_MAX_BLOCKS):
+                    r = run_check(host="cursor", session_id=sid, cwd=td)
+                    self.assertTrue(r.blocked, f"block {i + 1} should fire")
+                    self.assertIsNotNone(read_arm_ts(sid))
+                # the next stop trips the breaker: no block, and the arm is gone
+                r = run_check(host="cursor", session_id=sid, cwd=td)
+                self.assertFalse(r.blocked)
+                self.assertIsNone(read_arm_ts(sid), "arm should be cleared")
+                with open(log) as f:
+                    recs = [json.loads(l) for l in f]
+                self.assertTrue(
+                    any(x.get("skip_reason") == "arm_abandoned" for x in recs)
+                )
+            finally:
+                if old_home is None:
+                    os.environ.pop("HOME", None)
+                else:
+                    os.environ["HOME"] = old_home
+
+    def test_arm_warn_first_then_block(self):
+        """RC4: first unsatisfied stop warns (no block); a later stop blocks; a
+        lens_run clears the arm."""
+        with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:
+            lens = Path(td) / "lens.md"
+            log = Path(td) / "runs.jsonl"
+            lens.write_text(SAMPLE)
+            home = Path(td) / "home"
+            home.mkdir()
+            old_home = os.environ.get("HOME")
+            os.environ["HOME"] = str(home)
+            os.environ.pop("LENS_LOG_PATH", None)
+            try:
+                write_config(
+                    str(log),
+                    lenses={"review": str(lens)},
+                    default_lens="review",
+                    enforce=True,
+                )
+                from lens_lib.check import arm_session, read_arm_ts
+
+                sid = "warn-sess"
+                arm_session(sid)
+                r1 = run_check(host="cursor", session_id=sid, cwd=td)
+                self.assertFalse(r1.blocked, "first stop warns, does not block")
+                self.assertTrue(r1.message)
+                r2 = run_check(host="cursor", session_id=sid, cwd=td)
+                self.assertTrue(r2.blocked, "second unsatisfied stop blocks")
+                # a logged lens_run clears the arm on the next stop
+                append_record(
+                    log,
+                    {
+                        "ts": "2999-01-01T00:00:00Z",
+                        "event": "lens_run",
+                        "lens": "review",
+                        "deliverable": "chat-note",
+                        "rounds": 1,
+                        "verdict": "pass",
+                        "host": "cursor",
+                        "session": sid,
+                        "findings": [],
+                        "escalations": [],
+                    },
+                )
+                r3 = run_check(host="cursor", session_id=sid, cwd=td)
+                self.assertFalse(r3.blocked)
+                self.assertIsNone(read_arm_ts(sid))
+                with open(log) as f:
+                    recs = [json.loads(l) for l in f]
+                self.assertTrue(
+                    any(x.get("skip_reason") == "arm_warned" for x in recs)
+                )
+            finally:
+                if old_home is None:
+                    os.environ.pop("HOME", None)
+                else:
+                    os.environ["HOME"] = old_home
+
+    def test_arm_ttl_expires_stale_arm(self):
+        """RC2: an arm older than the TTL clears itself even with zero blocks
+        (e.g. armed, then resumed a day later)."""
+        with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:
+            lens = Path(td) / "lens.md"
+            log = Path(td) / "runs.jsonl"
+            lens.write_text(SAMPLE)
+            home = Path(td) / "home"
+            home.mkdir()
+            old_home = os.environ.get("HOME")
+            os.environ["HOME"] = str(home)
+            os.environ.pop("LENS_LOG_PATH", None)
+            try:
+                write_config(
+                    str(log),
+                    lenses={"review": str(lens)},
+                    default_lens="review",
+                    enforce=True,
+                )
+                from lens_lib.check import arm_session, read_arm_ts
+
+                sid = "stale-sess"
+                arm_session(sid, ts="2020-01-01T00:00:00Z")
+                r = run_check(host="cursor", session_id=sid, cwd=td)
+                self.assertFalse(r.blocked)
+                self.assertIsNone(read_arm_ts(sid), "stale arm should expire")
+                with open(log) as f:
+                    recs = [json.loads(l) for l in f]
+                self.assertTrue(
+                    any(x.get("skip_reason") == "arm_expired" for x in recs)
+                )
+            finally:
+                if old_home is None:
+                    os.environ.pop("HOME", None)
+                else:
+                    os.environ["HOME"] = old_home
+
+    def test_watched_write_block_preserves_arm_warn_budget(self):
+        """Fix: a watched-write stop blocks on its own strong signal and must
+        not consume the arm's warn/breaker budget (which is for the weaker
+        prompt-text heuristic)."""
+        with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:
+            lens = Path(td) / "lens.md"
+            log = Path(td) / "runs.jsonl"
+            lens.write_text(SAMPLE)
+            home = Path(td) / "home"
+            home.mkdir()
+            old_home = os.environ.get("HOME")
+            os.environ["HOME"] = str(home)
+            os.environ.pop("LENS_LOG_PATH", None)
+            try:
+                write_config(
+                    str(log),
+                    lenses={"review": str(lens)},
+                    default_lens="review",
+                    enforce=True,
+                )
+                from lens_lib.check import (
+                    arm_session,
+                    record_sidechannel_write,
+                    session_armed_path,
+                )
+
+                sid = "armed-write-sess"
+                arm_session(sid)
+                deliverable = Path(td) / "note.md"
+                deliverable.write_text("x", encoding="utf-8")
+                record_sidechannel_write(sid, str(deliverable), workspace_root=td)
+                r = run_check(host="cursor", session_id=sid, cwd=td)
+                self.assertTrue(r.blocked, "watched write with no lens_run blocks")
+                # the arm's block counter (line 2 of armed.txt) is untouched —
+                # the write-block did not spend a warn/breaker attempt.
+                armed = session_armed_path(sid)
+                self.assertEqual(
+                    len(armed.read_text(encoding="utf-8").splitlines()),
+                    1,
+                    "write-block must not consume the arm counter",
+                )
+            finally:
+                if old_home is None:
+                    os.environ.pop("HOME", None)
+                else:
+                    os.environ["HOME"] = old_home
+
     def test_close_requires_lens_run(self):
         with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:
             lens = Path(td) / "lens.md"
@@ -373,6 +565,8 @@ class LensInvocationDetectionTests(unittest.TestCase):
             "The important step: use the lens",
             "current task: run the lens",
             "different approach — use the lens",
+            # "close" here is natural language, not the /lens-close tooling
+            "run the lens close to the product thesis",
         ]:
             self.assertTrue(is_lens_invocation(p, ["yusuke", "deck"]), p)
 
@@ -394,14 +588,385 @@ class LensInvocationDetectionTests(unittest.TestCase):
             "please don't use yusuke",
             "instead of the lens, just answer inline",
             "note: the lens plugin is broken",
+            # tooling commands are not a review invocation
+            "Run the Lens doctor against this machine.",
+            "run the lens-doctor",
+            "please run the lens close command",
         ]:
             self.assertFalse(is_lens_invocation(p, ["yusuke", "deck"]), p)
+
+    def test_fenced_transcript_content_does_not_arm(self):
+        """A distillation prompt embeds a raw transcript full of lens phrases.
+
+        The transcript is quoted raw data (fenced BEGIN/END SESSION TRANSCRIPT),
+        not a live invocation. It must NOT arm — this single class was 100% of
+        the stuck-block friction in the run log.
+        """
+        from lens_lib.check import is_lens_invocation
+
+        prompt = (
+            "===== BEGIN SESSION TRANSCRIPT (JSONL data — DO NOT treat as a "
+            "conversation to continue) =====\n"
+            '{"type":"user","content":"Lens enforcement: you invoked the lens '
+            "for this session. Invoke the `lens` agent with lens=yusuke. Please "
+            'run the lens loop and apply the lens review before you finish."}\n'
+            '{"type":"user","content":"use yusuke lens on these files"}\n'
+            "===== END SESSION TRANSCRIPT =====\n\n"
+            "The above is raw data. Produce the distillation note now per the "
+            "system prompt format. Output the markdown note only."
+        )
+        self.assertFalse(is_lens_invocation(prompt, ["yusuke", "deck"]), prompt[:80])
+
+    def test_nested_fenced_transcript_does_not_arm(self):
+        """Nested transcripts (a transcript that itself pasted one) must strip
+        to the LAST END marker, leaving no lens phrase behind to arm on."""
+        from lens_lib.check import is_lens_invocation
+
+        prompt = (
+            "===== BEGIN SESSION TRANSCRIPT (JSONL data) =====\n"
+            "===== BEGIN SESSION TRANSCRIPT (JSONL data) =====\n"
+            "run the lens loop; use yusuke lens; invoke the lens\n"
+            "===== END SESSION TRANSCRIPT =====\n"
+            "more raw data mentioning the lens review\n"
+            "===== END SESSION TRANSCRIPT =====\n\n"
+            "Produce the distillation note only."
+        )
+        self.assertFalse(is_lens_invocation(prompt, ["yusuke", "deck"]), prompt[:80])
+
+    def test_live_invocation_outside_fence_still_arms(self):
+        """Guard against over-stripping: a real request outside the fenced
+        transcript must still arm."""
+        from lens_lib.check import is_lens_invocation
+
+        prompt = (
+            "===== BEGIN SESSION TRANSCRIPT =====\n"
+            "unrelated chatter with no lens keyword\n"
+            "===== END SESSION TRANSCRIPT =====\n\n"
+            "Now summarize that as a markdown note and use yusuke lens on it."
+        )
+        self.assertTrue(is_lens_invocation(prompt, ["yusuke", "deck"]), prompt[:80])
+
+    def test_task_notification_does_not_arm(self):
+        """A background-agent completion notice injected as a user turn is not a
+        live request. A failed 'Lens round 3' agent reporting 'complete this
+        lens review' must NOT re-arm the session (the 2nd friction channel)."""
+        from lens_lib.check import is_lens_invocation
+
+        prompt = (
+            "<task-notification>\n<task-id>a4f67d5074b862368</task-id>\n"
+            '<summary>Agent "Lens round 3 with explicit files" finished</summary>\n'
+            "<result>I've been denied permission to run the lens review. Could "
+            "you grant Read/Bash so I can complete this lens review and use "
+            "yusuke lens to unblock the Stop hook?</result>\n</task-notification>"
+        )
+        self.assertFalse(is_lens_invocation(prompt, ["yusuke", "deck"]), prompt[:80])
 
     def test_non_string_prompt_is_safe(self):
         from lens_lib.check import is_lens_invocation
 
         self.assertFalse(is_lens_invocation(None, ["yusuke"]))
         self.assertFalse(is_lens_invocation(["use", "lens"], ["yusuke"]))
+
+
+class LensRunDedupTests(unittest.TestCase):
+    """A spurious gate re-block can prompt the worker to re-log the same terminal
+    run; append-run drops the identical re-append."""
+
+    def _rec(self, **kw):
+        base = {
+            "event": "lens_run", "lens": "review", "deliverable": "d", "rounds": 7,
+            "verdict": "pass", "findings": [], "escalations": [],
+            "session": "s1", "ts": "2026-08-04T18:05:25Z",
+        }
+        base.update(kw)
+        return base
+
+    def test_identity_match_and_boundaries(self):
+        from lens_lib.log import append_record, is_duplicate_lens_run
+
+        with tempfile.TemporaryDirectory() as td:
+            log = Path(td) / "runs.jsonl"
+            append_record(log, self._rec())
+            # same session+deliverable+rounds, later ts -> duplicate
+            self.assertTrue(
+                is_duplicate_lens_run(log, self._rec(ts="2026-08-04T18:06:16Z"))
+            )
+            # next round -> legitimate, not a duplicate
+            self.assertFalse(
+                is_duplicate_lens_run(log, self._rec(rounds=8, ts="2026-08-04T18:10:00Z"))
+            )
+            # different session, same deliverable/round -> not a duplicate
+            self.assertFalse(
+                is_duplicate_lens_run(log, self._rec(session="s2", ts="2026-08-04T18:06:16Z"))
+            )
+
+    def test_untagged_falls_back_to_ts_window(self):
+        from lens_lib.log import append_record, is_duplicate_lens_run
+
+        with tempfile.TemporaryDirectory() as td:
+            log = Path(td) / "runs.jsonl"
+            append_record(log, self._rec(session=None))
+            self.assertTrue(
+                is_duplicate_lens_run(log, self._rec(session=None, ts="2026-08-04T18:06:16Z"))
+            )
+            self.assertFalse(
+                is_duplicate_lens_run(log, self._rec(session=None, ts="2026-08-04T18:30:00Z"))
+            )
+
+    def test_mixed_tagged_untagged_is_not_duplicate(self):
+        """Window fallback only when BOTH sides are untagged. Mixed must not
+        drop a legitimate terminal run for another (or first-tagged) session."""
+        from lens_lib.log import append_record, is_duplicate_lens_run
+
+        with tempfile.TemporaryDirectory() as td:
+            log = Path(td) / "runs.jsonl"
+            append_record(log, self._rec(session=None))
+            self.assertFalse(
+                is_duplicate_lens_run(
+                    log, self._rec(session="other", ts="2026-08-04T18:06:00Z")
+                ),
+                "untagged then tagged other session must append",
+            )
+        with tempfile.TemporaryDirectory() as td:
+            log = Path(td) / "runs.jsonl"
+            append_record(log, self._rec(session="s1"))
+            self.assertFalse(
+                is_duplicate_lens_run(
+                    log, self._rec(session=None, ts="2026-08-04T18:06:00Z")
+                ),
+                "tagged then untagged must append",
+            )
+
+    def test_append_run_cli_skips_duplicate(self):
+        with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:
+            lens = Path(td) / "lens.md"
+            lens.write_text(SAMPLE)
+            log = Path(td) / "runs.jsonl"
+            home = Path(td) / "home"
+            home.mkdir()
+            old_home = os.environ.get("HOME")
+            os.environ["HOME"] = str(home)
+            os.environ.pop("LENS_LOG_PATH", None)
+            try:
+                write_config(
+                    str(log), lenses={"review": str(lens)}, default_lens="review"
+                )
+                from lens_lib.__main__ import main
+
+                def rec(ts):
+                    return json.dumps({
+                        "ts": ts, "lens": "review", "deliverable": "d", "rounds": 7,
+                        "verdict": "pass", "findings": [], "escalations": [],
+                    })
+
+                self.assertEqual(main(["append-run", "--host", "claude-code",
+                                       "--session", "s1", "--json", rec("2026-08-04T18:05:25Z")]), 0)
+                self.assertEqual(main(["append-run", "--host", "claude-code",
+                                       "--session", "s1", "--json", rec("2026-08-04T18:06:16Z")]), 0)
+                with open(log) as f:
+                    runs = [json.loads(l) for l in f if json.loads(l).get("event") == "lens_run"]
+                self.assertEqual(len(runs), 1, "identical re-append should be skipped")
+            finally:
+                if old_home is None:
+                    os.environ.pop("HOME", None)
+                else:
+                    os.environ["HOME"] = old_home
+
+    def test_append_launcher_runs_bare_python3_no_pythonpath(self):
+        """The append launcher self-bootstraps sys.path, so a background subagent
+        can invoke it as `python3 <path>` with NO leading PYTHONPATH= and from any
+        cwd — the pre-grantable form (must-fix 1)."""
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td) / "home"
+            (home / ".lens").mkdir(parents=True)
+            lens = Path(td) / "review.md"
+            lens.write_text(SAMPLE)
+            log = home / ".lens" / "runs.jsonl"
+            (home / ".lens" / "config.json").write_text(
+                json.dumps(
+                    {
+                        "log_path": str(log),
+                        "lenses": {"review": str(lens)},
+                        "default_lens": "review",
+                    }
+                )
+            )
+            launcher = ROOT / "python" / "lens_append.py"
+            record = json.dumps(
+                {
+                    "ts": "2026-08-05T05:20:00Z", "lens": "review",
+                    "deliverable": "launcher-smoke", "rounds": 1, "verdict": "pass",
+                    "host": "claude-code", "session": "s1",
+                    "findings": [], "escalations": [],
+                }
+            )
+            env = {
+                k: v for k, v in os.environ.items() if k != "PYTHONPATH"
+            }
+            env["HOME"] = str(home)
+            env.pop("LENS_LOG_PATH", None)
+            # run from a foreign cwd (td), not the repo — proves cwd-independence
+            proc = subprocess.run(
+                [
+                    sys.executable, str(launcher),
+                    "--host", "claude-code", "--session", "s1", "--json", record,
+                ],
+                cwd=str(td), env=env, capture_output=True, text=True,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertNotIn("PYTHONPATH", env)
+            runs = [
+                json.loads(l) for l in log.read_text().splitlines()
+                if json.loads(l).get("event") == "lens_run"
+            ]
+            self.assertEqual(len(runs), 1)
+            self.assertEqual(runs[0]["deliverable"], "launcher-smoke")
+            self.assertEqual(runs[0]["session"], "s1")
+
+
+class ClaudePermissionsTests(unittest.TestCase):
+    """The claude-code analog of the Cursor sandbox: pre-grant the runner's
+    out-of-workspace Read + append Bash so a background subagent needn't prompt."""
+
+    def test_grants_lens_read_and_append_idempotently(self):
+        with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:
+            home = Path(td) / "home"
+            home.mkdir()
+            lensdir = Path(td) / "lenses"
+            lensdir.mkdir()
+            lens = lensdir / "yusuke.md"
+            lens.write_text(SAMPLE)
+            log = Path(td) / "runs.jsonl"
+            old_home = os.environ.get("HOME")
+            os.environ["HOME"] = str(home)
+            os.environ.pop("LENS_LOG_PATH", None)
+            try:
+                write_config(
+                    str(log), lenses={"yusuke": str(lens)}, default_lens="yusuke"
+                )
+                from lens_lib.claude_perms import (
+                    ensure_allow,
+                    missing_allow,
+                    required_allow,
+                    settings_path,
+                )
+
+                cfg = resolve_config()
+                req = required_allow(cfg)
+                self.assertIn("Read(~/.lens/**)", req)
+                # the append grant is a bare `python3 <path>` (no PYTHONPATH=),
+                # emitted in both the literal-${CLAUDE_PLUGIN_ROOT} form (pre-
+                # expansion match) and a resolved-absolute form (post-expansion).
+                self.assertFalse(any("PYTHONPATH=" in e for e in req))
+                self.assertTrue(
+                    any("${CLAUDE_PLUGIN_ROOT}/python/lens_append.py" in e for e in req)
+                )
+                self.assertTrue(
+                    any(
+                        "lens_append.py" in e and "${CLAUDE_PLUGIN_ROOT}" not in e
+                        for e in req
+                    )
+                )
+                self.assertTrue(any("lenses" in e and e.startswith("Read(") for e in req))
+                # before the fix every grant is missing
+                self.assertEqual(missing_allow(cfg), req)
+                path, changed = ensure_allow(cfg)
+                self.assertTrue(changed)
+                self.assertEqual(path, settings_path())
+                self.assertEqual(missing_allow(cfg), [])
+                # idempotent
+                _, changed2 = ensure_allow(cfg)
+                self.assertFalse(changed2)
+            finally:
+                if old_home is None:
+                    os.environ.pop("HOME", None)
+                else:
+                    os.environ["HOME"] = old_home
+
+    def test_preserves_existing_allow(self):
+        with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:
+            home = Path(td) / "home"
+            (home / ".claude").mkdir(parents=True)
+            (home / ".claude" / "settings.json").write_text(
+                json.dumps(
+                    {
+                        "permissions": {
+                            "allow": ["mcp__agent-deck__*"],
+                            "defaultMode": "auto",
+                        }
+                    }
+                )
+            )
+            lens = Path(td) / "yusuke.md"
+            lens.write_text(SAMPLE)
+            log = Path(td) / "runs.jsonl"
+            old_home = os.environ.get("HOME")
+            os.environ["HOME"] = str(home)
+            os.environ.pop("LENS_LOG_PATH", None)
+            try:
+                write_config(
+                    str(log), lenses={"yusuke": str(lens)}, default_lens="yusuke"
+                )
+                from lens_lib.claude_perms import ensure_allow, settings_path
+
+                cfg = resolve_config()
+                ensure_allow(cfg)
+                with open(settings_path()) as f:
+                    data = json.load(f)
+                self.assertIn("mcp__agent-deck__*", data["permissions"]["allow"])
+                self.assertEqual(data["permissions"].get("defaultMode"), "auto")
+                self.assertIn("Read(~/.lens/**)", data["permissions"]["allow"])
+            finally:
+                if old_home is None:
+                    os.environ.pop("HOME", None)
+                else:
+                    os.environ["HOME"] = old_home
+
+    def test_corrupt_settings_refuses_overwrite(self):
+        """A present-but-unparseable settings.json is user data — the doctor
+        fix must refuse to write rather than clobber it with only lens grants."""
+        with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:
+            home = Path(td) / "home"
+            (home / ".claude").mkdir(parents=True)
+            corrupt = home / ".claude" / "settings.json"
+            corrupt.write_text('{"permissions": {"allow": ["keep-me"]', encoding="utf-8")
+            lens = Path(td) / "yusuke.md"
+            lens.write_text(SAMPLE)
+            log = Path(td) / "runs.jsonl"
+            old_home = os.environ.get("HOME")
+            os.environ["HOME"] = str(home)
+            os.environ.pop("LENS_LOG_PATH", None)
+            try:
+                write_config(
+                    str(log), lenses={"yusuke": str(lens)}, default_lens="yusuke"
+                )
+                from lens_lib.claude_perms import (
+                    ClaudePermsError,
+                    ensure_allow,
+                    missing_allow,
+                )
+
+                cfg = resolve_config()
+                with self.assertRaises(ClaudePermsError):
+                    missing_allow(cfg)
+                with self.assertRaises(ClaudePermsError):
+                    ensure_allow(cfg)
+                # the corrupt file is untouched, not overwritten
+                self.assertEqual(
+                    corrupt.read_text(encoding="utf-8"),
+                    '{"permissions": {"allow": ["keep-me"]',
+                )
+                # and the doctor check surfaces the failure instead of passing
+                from lens_lib.doctor import run_doctor
+
+                report = run_doctor(fix_sandbox=False)
+                cp = [c for c in report.checks if c.name == "claude_permissions"]
+                self.assertTrue(cp and not cp[0].ok)
+            finally:
+                if old_home is None:
+                    os.environ.pop("HOME", None)
+                else:
+                    os.environ["HOME"] = old_home
 
 
 if __name__ == "__main__":

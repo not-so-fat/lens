@@ -45,7 +45,7 @@ def cmd_close(args: argparse.Namespace) -> int:
 
 def cmd_append_run(args: argparse.Namespace) -> int:
     from .config import resolve_config
-    from .log import append_record, validate_lens_run_shape
+    from .log import append_record, is_duplicate_lens_run, validate_lens_run_shape
 
     raw = args.json or sys.stdin.read()
     try:
@@ -63,6 +63,13 @@ def cmd_append_run(args: argparse.Namespace) -> int:
         print("append-run: " + "; ".join(errors), file=sys.stderr)
         return 1
     cfg = resolve_config()
+    if is_duplicate_lens_run(cfg.log_path, record):
+        print(str(cfg.log_path))
+        print(
+            "append-run: identical terminal lens_run already logged; skipped",
+            file=sys.stderr,
+        )
+        return 0
     path = append_record(cfg.log_path, record)
     print(path)
     return 0

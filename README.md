@@ -68,8 +68,6 @@ Then **Developer: Reload Window**, open any workspace, run `/lens-doctor`.
 
 Hook commands use `${CURSOR_PLUGIN_ROOT}` (plugin install dir), **not** `./python/...` relative to your project. You do **not** copy hook scripts into each workspace — one plugin install covers every folder you open.
 
-Doctor merges lens file directories into `~/.cursor/sandbox.json` `additionalReadonlyPaths`.
-
 ### Host contract (Cursor enforcement)
 
 Cursor `stop` often has little/no transcript. Enforcement needs:
@@ -100,7 +98,7 @@ On a terminal round it appends one `lens_run` (field `lens` = name) to `log_path
 
 ### Chat deliverables & explicit invocation
 
-Enforcement normally fires on writes to `watch_globs` files. A deliverable produced **in the chat** (analysis, comparison, summary) writes no file, so the write gate can't see it. But on **Claude Code**, when you **explicitly ask for the lens** — e.g. `use yusuke lens`, `lens=deck`, `run the lens`, `with yusuke lens` — a `UserPromptSubmit` hook **arms** the session: the Stop hook then blocks until a `lens_run` is logged for it, **regardless of writes**. So an explicit request is enforced for chat work too, and disarms once the run lands. (Negated/hedged mentions — "don't use the lens" — do not arm.)
+Enforcement normally fires on writes to `watch_globs` files. A deliverable produced **in the chat** (analysis, comparison, summary) writes no file, so the write gate can't see it. But on **Claude Code**, when you **explicitly ask for the lens** — e.g. `use yusuke lens`, `lens=deck`, `run the lens`, `with yusuke lens` — a `UserPromptSubmit` hook **arms** the session: the Stop hook then requires a `lens_run` for it, **regardless of writes**, and disarms once the run lands. Because a prompt-text arm is a heuristic, enforcement is warn-first — the first unsatisfied stop only warns, a later one blocks — and self-clearing (a 3-block circuit breaker + a 2 h TTL) so a false or abandoned arm can't wedge the session. So an explicit request is enforced for chat work too. (Negated/hedged mentions — "don't use the lens" — do not arm.)
 
 Not yet on **Cursor** (no prompt-submit arming wired — tracked in [`docs/ISSUES.md`](docs/ISSUES.md) I-9); and a chat deliverable you did *not* explicitly flag is still not auto-enforced on either host. Set `"enforce": false` to pause all blocking.
 
@@ -111,6 +109,15 @@ Not yet on **Cursor** (no prompt-submit arming wired — tracked in [`docs/ISSUE
 ```
 
 Doctor fails if Claude/Cursor hook commands are workspace-relative (`./python/...`) or if `${CLAUDE_PLUGIN_ROOT}` / `${CURSOR_PLUGIN_ROOT}` do not expand to real scripts under the plugin install.
+
+### Runner access (out-of-workspace lens files)
+
+The reviewer must read the lens files, which live outside the repo (`~/.lens/config.json` and the lens markdown in your vault). Interactive sessions approve those reads on prompt, but a **background** subagent can't prompt, so the review silently fails. Doctor pre-grants the access, per host, from your configured lens directories:
+
+- **`cursor_sandbox`** — merges each lens dir into `~/.cursor/sandbox.json` `additionalReadonlyPaths`.
+- **`claude_permissions`** — adds `Read(<lens dirs>/**)`, `Read(~/.lens/**)`, `Bash(python3 "${CLAUDE_PLUGIN_ROOT}/python/lens_append.py":*)` (plus a resolved-absolute variant of the same launcher), and `Bash(date:*)` to `~/.claude/settings.json` `permissions.allow`. The append launcher is a bare `python3 <path>` (no leading `PYTHONPATH=`) so a background reviewer subagent can run it without a prompt — Claude allow-rules don't match past an env-var assignment. Both grant forms are emitted so the match holds whether the permission matcher compares the command before or after `${CLAUDE_PLUGIN_ROOT}` expansion.
+
+Both are written by `/lens-doctor` (fix mode); `--no-fix-sandbox` only reports gaps. Writing Claude grants widens auto-approve permissions, so if the agent's own run is blocked by a self-modification guard, run `/lens-doctor` yourself. (**Codex**: the equivalent — `writable_roots` / `sandbox_mode` — is deferred with the rest of the Codex port, see `docs/PRD.md`.)
 
 ## Unlocking Cursor stop follow-ups (`loop_limit`)
 

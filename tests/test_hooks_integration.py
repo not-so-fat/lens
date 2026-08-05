@@ -293,7 +293,11 @@ class HookIntegrationTests(unittest.TestCase):
         return t
 
     def test_claude_explicit_invocation_arms_and_blocks_without_writes(self):
-        """I-9: 'use <lens>' on a chat turn (no watched write) must still enforce a lens_run."""
+        """I-9: 'use <lens>' on a chat turn (no watched write) must still enforce a lens_run.
+
+        Warn-first: first unsatisfied stop warns (exit 0, arm_warned); a later
+        stop blocks (exit 2) until a same-session lens_run lands.
+        """
         prompt = _run_hook(
             CLAUDE_PROMPT,
             {"prompt": "run the lens on this", "session_id": "sess-1", "cwd": str(self.td)},
@@ -301,16 +305,27 @@ class HookIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(prompt.returncode, 0, prompt.stderr)
         transcript = self._transcript_no_write()
+        warn = _run_hook(
+            CLAUDE_STOP,
+            {"transcript_path": str(transcript), "session_id": "sess-1", "cwd": str(self.td)},
+            self.env,
+        )
+        self.assertEqual(warn.returncode, 0, warn.stderr)  # warn-first, no block yet
+        self.assertIn("lens_run", warn.stderr)
+        rec_w = json.loads(self.log.read_text(encoding="utf-8").strip().splitlines()[-1])
+        self.assertTrue(rec_w["armed"])
+        self.assertFalse(rec_w["blocked"])
+        self.assertEqual(rec_w.get("skip_reason"), "arm_warned")
+        self.assertFalse(rec_w["wrote_watched"])
         stop = _run_hook(
             CLAUDE_STOP,
             {"transcript_path": str(transcript), "session_id": "sess-1", "cwd": str(self.td)},
             self.env,
         )
-        self.assertEqual(stop.returncode, 2, stop.stderr)  # blocked despite no writes
+        self.assertEqual(stop.returncode, 2, stop.stderr)  # second stop blocks
         rec = json.loads(self.log.read_text(encoding="utf-8").strip().splitlines()[-1])
         self.assertTrue(rec["armed"])
         self.assertTrue(rec["blocked"])
-        self.assertFalse(rec["wrote_watched"])
         # A session-tagged lens_run satisfies the arm; the next stop passes and disarms.
         with self.log.open("a", encoding="utf-8") as f:
             f.write(

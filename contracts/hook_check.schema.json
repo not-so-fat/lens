@@ -49,7 +49,7 @@
     },
     "skip_reason": {
       "type": "string",
-      "description": "why enforcement did not block despite activity (enforce_false, no_watch_match, excluded_only)"
+      "description": "why enforcement did not block despite activity (enforce_false, no_watch_match, excluded_only, arm_warned, arm_expired, arm_abandoned). arm_warned = first unsatisfied stop after an arm (warn-first, no block yet); arm_expired/arm_abandoned = an unsatisfied arm auto-cleared by the TTL/circuit-breaker guards"
     },
     "duration_ms": { "type": "number", "minimum": 0 },
     "host": {
