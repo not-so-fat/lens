@@ -20,7 +20,7 @@ from .config import (
 )
 from .lens_parse import parse_lens_file
 from .log import ensure_log
-from .claude_perms import ensure_allow, missing_allow
+from .claude_perms import ClaudePermsError, ensure_allow, missing_allow
 from .claude_perms import settings_path as claude_settings_path
 from .sandbox import ensure_readonly_path, path_in_sandbox, sandbox_path
 from .util import claude_home, cursor_home, expand_path
@@ -332,19 +332,23 @@ def run_doctor(
                 f"{cpath} grants lens read + append"
                 + (" (updated)" if cchanged else ""),
             )
-        except OSError as e:
+        except (OSError, ClaudePermsError) as e:
             report.add("claude_permissions", False, str(e))
     else:
-        miss = missing_allow(cfg)
-        report.add(
-            "claude_permissions",
-            not miss,
-            (
-                f"{claude_settings_path()} grants all lens access"
-                if not miss
-                else "missing grants: " + ", ".join(miss)
-            ),
-        )
+        try:
+            miss = missing_allow(cfg)
+        except ClaudePermsError as e:
+            report.add("claude_permissions", False, str(e))
+        else:
+            report.add(
+                "claude_permissions",
+                not miss,
+                (
+                    f"{claude_settings_path()} grants all lens access"
+                    if not miss
+                    else "missing grants: " + ", ".join(miss)
+                ),
+            )
 
     return report
 

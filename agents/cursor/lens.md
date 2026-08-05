@@ -55,9 +55,9 @@ Because this agent is readonly, do **not** write the log yourself. After the ver
 
 `LENS_LOG_APPEND: { ...json object with host cursor... }`
 
-The worker must append it (from the lens plugin root):
+The worker must append it via the append launcher (a bare `python3 <path>`, cwd-independent):
 
-`PYTHONPATH=python python3 -m lens_lib append-run --host cursor --session '<id>' --json '...'`
+`python3 "${CURSOR_PLUGIN_ROOT}/python/lens_append.py" --host cursor --session '<id>' --json '...'`
 
 - `"lens"` is the **name** (not the file path).
 - `"session"` must be this chat's conversation/session id (Cursor stop has no transcript window without it as a backup).

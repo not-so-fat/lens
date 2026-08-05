@@ -49,8 +49,9 @@ def _real_ids(ids: List[str]) -> List[str]:
 # --- Explicit-invocation arming (I-9) ------------------------------------
 # A chat deliverable never writes a watched file, so the write-triggered gate
 # cannot catch "use <lens>". When the user explicitly asks for the lens, a
-# UserPromptSubmit hook arms the session; the Stop hook then blocks until a
-# lens_run is logged, regardless of writes.
+# UserPromptSubmit hook arms the session; the Stop hook then requires a lens_run
+# regardless of writes — warn-first (the first unsatisfied stop warns, a later
+# one blocks) and self-clearing via a circuit breaker + TTL.
 
 # Negations / hedges that flip an otherwise-matching phrase ("don't use the lens").
 # The contraction alternative requires the apostrophe so ordinary words ending in
@@ -101,8 +102,13 @@ def _strip_injected_blocks(text: str) -> str:
 # "lens doctor" / "lens close" (the /lens-doctor, /lens-close tooling commands,
 # whose expanded bodies say "Run the Lens doctor…") are lens *tooling*, not a
 # request to run the review lens — so a match ending in "lens" followed by one
-# of these must not arm.
-_TOOLING_AFTER = re.compile(r"[-\s]+(?:doctor|close)\b", re.IGNORECASE)
+# of these must not arm. "doctor" is distinctive enough to suppress after any
+# separator; "close" is a common word, so suppress it only in its tooling forms
+# — hyphenated (`/lens-close`, `lens-close`) or the "close command" noun — while
+# a bare "lens close to <x>" is natural language that must still arm (I-9).
+_TOOLING_AFTER = re.compile(
+    r"[-\s]+doctor\b|-+close\b|\s+close\s+command\b", re.IGNORECASE
+)
 
 
 def _negated_before(text: str, idx: int) -> bool:
@@ -134,7 +140,8 @@ def is_lens_invocation(prompt: str, known_names: Sequence[str] = ()) -> bool:
         for m in re.finditer(pat, prompt, re.IGNORECASE):
             if _negated_before(prompt, m.start()):
                 continue
-            if _TOOLING_AFTER.match(prompt[m.end():m.end() + 10]):
+            # Window must fit the longest tooling suffix (" close command").
+            if _TOOLING_AFTER.match(prompt[m.end():m.end() + 24]):
                 continue
             return True
     return False
@@ -349,9 +356,13 @@ def run_check(
     # (up to ARM_MAX_BLOCKS), then the breaker/TTL clear it. Genuine arms (agent
     # runs the lens after the warning) never block; a false arm costs at most one
     # warning before the first block.
+    # A watched-write stop blocks on its own (strong signal); the arm gate is
+    # moot on that stop, so don't let it consume the arm's warn/breaker budget —
+    # only escalate the arm when it is the operative reason to block.
+    block_writes = watched_writes and not lens_run_found
     arm_cleared: Optional[str] = None
     arm_warn = False
-    if armed and not armed_satisfied and cfg.enforce:
+    if armed and not armed_satisfied and cfg.enforce and not block_writes:
         age = _arm_age_seconds(armed_ts)
         if age is not None and age > ARM_TTL_SECONDS:
             arm_cleared = "arm_expired"
@@ -367,7 +378,6 @@ def run_check(
             for sid in armed_ids:
                 disarm_session(sid)
 
-    block_writes = watched_writes and not lens_run_found
     block_armed = (
         armed and not armed_satisfied and arm_cleared is None and not arm_warn
     )

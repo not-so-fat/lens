@@ -3,7 +3,8 @@
 
 A chat deliverable never writes a watched file, so "use <lens>" cannot be
 caught by the write-triggered Stop gate. When the user explicitly asks for the
-lens, arm the session; the Stop hook then blocks until a lens_run is logged.
+lens, arm the session; the Stop hook then warns and, if still unsatisfied on a
+later stop, blocks until a lens_run is logged.
 """
 
 from __future__ import annotations
@@ -53,7 +54,8 @@ def main() -> int:
         print(
             "[lens] Explicit lens invocation detected. Before ending this turn you "
             "MUST run the `lens` agent on the deliverable and log a lens_run for "
-            "this session (include \"session\"); otherwise the Stop hook will block."
+            "this session (include \"session\"); otherwise the Stop hook will warn "
+            "and then block on a later stop until a lens_run is logged."
         )
     return 0
 

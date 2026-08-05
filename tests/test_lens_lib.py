@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -380,6 +381,53 @@ class LogAndCheckTests(unittest.TestCase):
                 else:
                     os.environ["HOME"] = old_home
 
+    def test_watched_write_block_preserves_arm_warn_budget(self):
+        """Fix: a watched-write stop blocks on its own strong signal and must
+        not consume the arm's warn/breaker budget (which is for the weaker
+        prompt-text heuristic)."""
+        with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:
+            lens = Path(td) / "lens.md"
+            log = Path(td) / "runs.jsonl"
+            lens.write_text(SAMPLE)
+            home = Path(td) / "home"
+            home.mkdir()
+            old_home = os.environ.get("HOME")
+            os.environ["HOME"] = str(home)
+            os.environ.pop("LENS_LOG_PATH", None)
+            try:
+                write_config(
+                    str(log),
+                    lenses={"review": str(lens)},
+                    default_lens="review",
+                    enforce=True,
+                )
+                from lens_lib.check import (
+                    arm_session,
+                    record_sidechannel_write,
+                    session_armed_path,
+                )
+
+                sid = "armed-write-sess"
+                arm_session(sid)
+                deliverable = Path(td) / "note.md"
+                deliverable.write_text("x", encoding="utf-8")
+                record_sidechannel_write(sid, str(deliverable), workspace_root=td)
+                r = run_check(host="cursor", session_id=sid, cwd=td)
+                self.assertTrue(r.blocked, "watched write with no lens_run blocks")
+                # the arm's block counter (line 2 of armed.txt) is untouched —
+                # the write-block did not spend a warn/breaker attempt.
+                armed = session_armed_path(sid)
+                self.assertEqual(
+                    len(armed.read_text(encoding="utf-8").splitlines()),
+                    1,
+                    "write-block must not consume the arm counter",
+                )
+            finally:
+                if old_home is None:
+                    os.environ.pop("HOME", None)
+                else:
+                    os.environ["HOME"] = old_home
+
     def test_close_requires_lens_run(self):
         with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:
             lens = Path(td) / "lens.md"
@@ -517,6 +565,8 @@ class LensInvocationDetectionTests(unittest.TestCase):
             "The important step: use the lens",
             "current task: run the lens",
             "different approach — use the lens",
+            # "close" here is natural language, not the /lens-close tooling
+            "run the lens close to the product thesis",
         ]:
             self.assertTrue(is_lens_invocation(p, ["yusuke", "deck"]), p)
 
@@ -698,6 +748,57 @@ class LensRunDedupTests(unittest.TestCase):
                 else:
                     os.environ["HOME"] = old_home
 
+    def test_append_launcher_runs_bare_python3_no_pythonpath(self):
+        """The append launcher self-bootstraps sys.path, so a background subagent
+        can invoke it as `python3 <path>` with NO leading PYTHONPATH= and from any
+        cwd — the pre-grantable form (must-fix 1)."""
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td) / "home"
+            (home / ".lens").mkdir(parents=True)
+            lens = Path(td) / "review.md"
+            lens.write_text(SAMPLE)
+            log = home / ".lens" / "runs.jsonl"
+            (home / ".lens" / "config.json").write_text(
+                json.dumps(
+                    {
+                        "log_path": str(log),
+                        "lenses": {"review": str(lens)},
+                        "default_lens": "review",
+                    }
+                )
+            )
+            launcher = ROOT / "python" / "lens_append.py"
+            record = json.dumps(
+                {
+                    "ts": "2026-08-05T05:20:00Z", "lens": "review",
+                    "deliverable": "launcher-smoke", "rounds": 1, "verdict": "pass",
+                    "host": "claude-code", "session": "s1",
+                    "findings": [], "escalations": [],
+                }
+            )
+            env = {
+                k: v for k, v in os.environ.items() if k != "PYTHONPATH"
+            }
+            env["HOME"] = str(home)
+            env.pop("LENS_LOG_PATH", None)
+            # run from a foreign cwd (td), not the repo — proves cwd-independence
+            proc = subprocess.run(
+                [
+                    sys.executable, str(launcher),
+                    "--host", "claude-code", "--session", "s1", "--json", record,
+                ],
+                cwd=str(td), env=env, capture_output=True, text=True,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertNotIn("PYTHONPATH", env)
+            runs = [
+                json.loads(l) for l in log.read_text().splitlines()
+                if json.loads(l).get("event") == "lens_run"
+            ]
+            self.assertEqual(len(runs), 1)
+            self.assertEqual(runs[0]["deliverable"], "launcher-smoke")
+            self.assertEqual(runs[0]["session"], "s1")
+
 
 class ClaudePermissionsTests(unittest.TestCase):
     """The claude-code analog of the Cursor sandbox: pre-grant the runner's
@@ -729,7 +830,19 @@ class ClaudePermissionsTests(unittest.TestCase):
                 cfg = resolve_config()
                 req = required_allow(cfg)
                 self.assertIn("Read(~/.lens/**)", req)
-                self.assertTrue(any("append-run" in e for e in req))
+                # the append grant is a bare `python3 <path>` (no PYTHONPATH=),
+                # emitted in both the literal-${CLAUDE_PLUGIN_ROOT} form (pre-
+                # expansion match) and a resolved-absolute form (post-expansion).
+                self.assertFalse(any("PYTHONPATH=" in e for e in req))
+                self.assertTrue(
+                    any("${CLAUDE_PLUGIN_ROOT}/python/lens_append.py" in e for e in req)
+                )
+                self.assertTrue(
+                    any(
+                        "lens_append.py" in e and "${CLAUDE_PLUGIN_ROOT}" not in e
+                        for e in req
+                    )
+                )
                 self.assertTrue(any("lenses" in e and e.startswith("Read(") for e in req))
                 # before the fix every grant is missing
                 self.assertEqual(missing_allow(cfg), req)
@@ -779,6 +892,52 @@ class ClaudePermissionsTests(unittest.TestCase):
                 self.assertIn("mcp__agent-deck__*", data["permissions"]["allow"])
                 self.assertEqual(data["permissions"].get("defaultMode"), "auto")
                 self.assertIn("Read(~/.lens/**)", data["permissions"]["allow"])
+            finally:
+                if old_home is None:
+                    os.environ.pop("HOME", None)
+                else:
+                    os.environ["HOME"] = old_home
+
+    def test_corrupt_settings_refuses_overwrite(self):
+        """A present-but-unparseable settings.json is user data — the doctor
+        fix must refuse to write rather than clobber it with only lens grants."""
+        with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:
+            home = Path(td) / "home"
+            (home / ".claude").mkdir(parents=True)
+            corrupt = home / ".claude" / "settings.json"
+            corrupt.write_text('{"permissions": {"allow": ["keep-me"]', encoding="utf-8")
+            lens = Path(td) / "yusuke.md"
+            lens.write_text(SAMPLE)
+            log = Path(td) / "runs.jsonl"
+            old_home = os.environ.get("HOME")
+            os.environ["HOME"] = str(home)
+            os.environ.pop("LENS_LOG_PATH", None)
+            try:
+                write_config(
+                    str(log), lenses={"yusuke": str(lens)}, default_lens="yusuke"
+                )
+                from lens_lib.claude_perms import (
+                    ClaudePermsError,
+                    ensure_allow,
+                    missing_allow,
+                )
+
+                cfg = resolve_config()
+                with self.assertRaises(ClaudePermsError):
+                    missing_allow(cfg)
+                with self.assertRaises(ClaudePermsError):
+                    ensure_allow(cfg)
+                # the corrupt file is untouched, not overwritten
+                self.assertEqual(
+                    corrupt.read_text(encoding="utf-8"),
+                    '{"permissions": {"allow": ["keep-me"]',
+                )
+                # and the doctor check surfaces the failure instead of passing
+                from lens_lib.doctor import run_doctor
+
+                report = run_doctor(fix_sandbox=False)
+                cp = [c for c in report.checks if c.name == "claude_permissions"]
+                self.assertTrue(cp and not cp[0].ok)
             finally:
                 if old_home is None:
                     os.environ.pop("HOME", None)
