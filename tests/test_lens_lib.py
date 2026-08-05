@@ -713,6 +713,30 @@ class LensRunDedupTests(unittest.TestCase):
                 is_duplicate_lens_run(log, self._rec(session=None, ts="2026-08-04T18:30:00Z"))
             )
 
+    def test_mixed_tagged_untagged_is_not_duplicate(self):
+        """Window fallback only when BOTH sides are untagged. Mixed must not
+        drop a legitimate terminal run for another (or first-tagged) session."""
+        from lens_lib.log import append_record, is_duplicate_lens_run
+
+        with tempfile.TemporaryDirectory() as td:
+            log = Path(td) / "runs.jsonl"
+            append_record(log, self._rec(session=None))
+            self.assertFalse(
+                is_duplicate_lens_run(
+                    log, self._rec(session="other", ts="2026-08-04T18:06:00Z")
+                ),
+                "untagged then tagged other session must append",
+            )
+        with tempfile.TemporaryDirectory() as td:
+            log = Path(td) / "runs.jsonl"
+            append_record(log, self._rec(session="s1"))
+            self.assertFalse(
+                is_duplicate_lens_run(
+                    log, self._rec(session=None, ts="2026-08-04T18:06:00Z")
+                ),
+                "tagged then untagged must append",
+            )
+
     def test_append_run_cli_skips_duplicate(self):
         with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:
             lens = Path(td) / "lens.md"

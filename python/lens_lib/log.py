@@ -169,8 +169,9 @@ def is_duplicate_lens_run(
     Guards the append path against a redundant re-log: a spurious gate re-block
     (e.g. an arming re-fire) can prompt the worker to append the *same* run again
     ~a minute later — same findings, new ts. Identity = same deliverable + rounds
-    and either a shared session id, or — when a session is absent on either side —
-    the same verdict within window_seconds. Two different sessions reviewing the
+    and either a shared session id, or — when *both* sides are untagged — the same
+    verdict within window_seconds. Mixed tagged/untagged is never a duplicate
+    (cannot prove they are the same session). Two different sessions reviewing the
     same deliverable/round are NOT duplicates.
     """
     if record.get("event") != "lens_run":
@@ -191,11 +192,14 @@ def is_duplicate_lens_run(
             if new_ids & prev_ids:
                 return True
             continue  # different session, same deliverable/round — not a dup
+        if new_ids or prev_ids:
+            # Exactly one side tagged — cannot equate sessions; not a dup.
+            continue
         if rec.get("verdict") != record.get("verdict"):
             continue
         prev_ts = parse_iso_ts(str(rec.get("ts") or ""))
         if new_ts is None or prev_ts is None:
-            return True
+            continue  # unparseable ts — do not over-dedup
         if abs((new_ts - prev_ts).total_seconds()) <= window_seconds:
             return True
     return False
