@@ -236,6 +236,86 @@ class LogAndCheckTests(unittest.TestCase):
                 else:
                     os.environ["HOME"] = old_home
 
+    def test_arm_circuit_breaker_disarms_after_max_blocks(self):
+        """RC3: an unsatisfied arm gives up after ARM_MAX_BLOCKS instead of
+        blocking forever (the 92-blocks-in-10-min runaway)."""
+        with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:
+            lens = Path(td) / "lens.md"
+            log = Path(td) / "runs.jsonl"
+            lens.write_text(SAMPLE)
+            home = Path(td) / "home"
+            home.mkdir()
+            old_home = os.environ.get("HOME")
+            os.environ["HOME"] = str(home)
+            os.environ.pop("LENS_LOG_PATH", None)
+            try:
+                write_config(
+                    str(log),
+                    lenses={"review": str(lens)},
+                    default_lens="review",
+                    enforce=True,
+                )
+                from lens_lib.check import ARM_MAX_BLOCKS, arm_session, read_arm_ts
+
+                sid = "armed-sess"
+                arm_session(sid)
+                for i in range(ARM_MAX_BLOCKS):
+                    r = run_check(host="cursor", session_id=sid, cwd=td)
+                    self.assertTrue(r.blocked, f"block {i + 1} should fire")
+                    self.assertTrue(r.armed)
+                    self.assertIsNotNone(read_arm_ts(sid))
+                # the next stop trips the breaker: no block, and the arm is gone
+                r = run_check(host="cursor", session_id=sid, cwd=td)
+                self.assertFalse(r.blocked)
+                self.assertIsNone(read_arm_ts(sid), "arm should be cleared")
+                with open(log) as f:
+                    recs = [json.loads(l) for l in f]
+                self.assertTrue(
+                    any(x.get("skip_reason") == "arm_abandoned" for x in recs)
+                )
+            finally:
+                if old_home is None:
+                    os.environ.pop("HOME", None)
+                else:
+                    os.environ["HOME"] = old_home
+
+    def test_arm_ttl_expires_stale_arm(self):
+        """RC2: an arm older than the TTL clears itself even with zero blocks
+        (e.g. armed, then resumed a day later)."""
+        with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:
+            lens = Path(td) / "lens.md"
+            log = Path(td) / "runs.jsonl"
+            lens.write_text(SAMPLE)
+            home = Path(td) / "home"
+            home.mkdir()
+            old_home = os.environ.get("HOME")
+            os.environ["HOME"] = str(home)
+            os.environ.pop("LENS_LOG_PATH", None)
+            try:
+                write_config(
+                    str(log),
+                    lenses={"review": str(lens)},
+                    default_lens="review",
+                    enforce=True,
+                )
+                from lens_lib.check import arm_session, read_arm_ts
+
+                sid = "stale-sess"
+                arm_session(sid, ts="2020-01-01T00:00:00Z")
+                r = run_check(host="cursor", session_id=sid, cwd=td)
+                self.assertFalse(r.blocked)
+                self.assertIsNone(read_arm_ts(sid), "stale arm should expire")
+                with open(log) as f:
+                    recs = [json.loads(l) for l in f]
+                self.assertTrue(
+                    any(x.get("skip_reason") == "arm_expired" for x in recs)
+                )
+            finally:
+                if old_home is None:
+                    os.environ.pop("HOME", None)
+                else:
+                    os.environ["HOME"] = old_home
+
     def test_close_requires_lens_run(self):
         with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:
             lens = Path(td) / "lens.md"

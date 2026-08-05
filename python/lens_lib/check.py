@@ -6,6 +6,7 @@ import os
 import re
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -172,6 +173,53 @@ def disarm_session(session: str) -> None:
         pass
 
 
+# Amplifier guards (RC2/RC3): an unsatisfied arm must be able to clear itself so
+# a false or abandoned arm cannot wedge a session. In the run log one arm blocked
+# 92 times in 10 minutes because the only exit was a logged lens_run.
+ARM_MAX_BLOCKS = 3            # circuit breaker: give up after this many blocks
+ARM_TTL_SECONDS = 2 * 60 * 60  # expiry: an arm older than this is stale
+
+
+def _arm_age_seconds(armed_ts: str) -> Optional[float]:
+    try:
+        t = datetime.fromisoformat(armed_ts.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return None
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - t).total_seconds()
+
+
+def record_arm_block(session: str) -> int:
+    """Increment this arm's unsatisfied-block counter and return the new count.
+
+    The counter lives on line 2 of armed.txt; line 1 (ts + reason) is preserved
+    so read_arm_ts is unaffected. A fresh arm_session() overwrites the file and
+    resets the counter, which is correct — a new invocation restarts the budget.
+    """
+    if not session or session == "unknown":
+        return 0
+    path = session_armed_path(session)
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return 0
+    if not lines:
+        return 0
+    n = 0
+    if len(lines) >= 2:
+        try:
+            n = int(lines[1].strip())
+        except ValueError:
+            n = 0
+    n += 1
+    try:
+        path.write_text(f"{lines[0]}\n{n}\n", encoding="utf-8")
+    except OSError:
+        pass
+    return n
+
+
 def run_check(
     *,
     host: str,
@@ -272,10 +320,13 @@ def run_check(
     # Explicit-invocation arming (I-9): the user asked for the lens; require a
     # lens_run for this session regardless of watched writes.
     armed_ts: Optional[str] = None
+    armed_ids: List[str] = []
     for sid in real:
         a = read_arm_ts(sid)
-        if a and (armed_ts is None or a < armed_ts):
-            armed_ts = a
+        if a:
+            armed_ids.append(sid)
+            if armed_ts is None or a < armed_ts:
+                armed_ts = a
     armed = armed_ts is not None
     armed_satisfied = False
     if armed:
@@ -289,8 +340,27 @@ def run_check(
             if gate == "none":
                 gate = "session"
 
+    # Amplifier guards (RC2/RC3): let an unsatisfied arm clear itself. Expire a
+    # stale arm; otherwise count this block and give up after ARM_MAX_BLOCKS so a
+    # false/abandoned arm can't wedge the session. `armed` stays truthful for the
+    # record; `arm_cleared` (surfaced via skip_reason) suppresses the block.
+    arm_cleared: Optional[str] = None
+    if armed and not armed_satisfied and cfg.enforce:
+        age = _arm_age_seconds(armed_ts)
+        if age is not None and age > ARM_TTL_SECONDS:
+            arm_cleared = "arm_expired"
+        else:
+            attempts = 0
+            for sid in armed_ids:
+                attempts = max(attempts, record_arm_block(sid))
+            if attempts > ARM_MAX_BLOCKS:
+                arm_cleared = "arm_abandoned"
+        if arm_cleared:
+            for sid in armed_ids:
+                disarm_session(sid)
+
     block_writes = watched_writes and not lens_run_found
-    block_armed = armed and not armed_satisfied
+    block_armed = armed and not armed_satisfied and arm_cleared is None
     should_block = bool(cfg.enforce and (block_writes or block_armed))
 
     sess_hint = (
@@ -339,7 +409,9 @@ def run_check(
     duration_ms = (time.perf_counter() - started) * 1000
 
     skip_reason = None
-    if watched_writes and not cfg.enforce:
+    if arm_cleared:
+        skip_reason = arm_cleared
+    elif watched_writes and not cfg.enforce:
         skip_reason = "enforce_false"
     elif not watched_writes and written_all and not wrote_watched:
         skip_reason = "no_watch_match"
