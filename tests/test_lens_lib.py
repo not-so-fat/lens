@@ -394,8 +394,78 @@ class LensInvocationDetectionTests(unittest.TestCase):
             "please don't use yusuke",
             "instead of the lens, just answer inline",
             "note: the lens plugin is broken",
+            # tooling commands are not a review invocation
+            "Run the Lens doctor against this machine.",
+            "run the lens-doctor",
+            "please run the lens close command",
         ]:
             self.assertFalse(is_lens_invocation(p, ["yusuke", "deck"]), p)
+
+    def test_fenced_transcript_content_does_not_arm(self):
+        """A distillation prompt embeds a raw transcript full of lens phrases.
+
+        The transcript is quoted raw data (fenced BEGIN/END SESSION TRANSCRIPT),
+        not a live invocation. It must NOT arm — this single class was 100% of
+        the stuck-block friction in the run log.
+        """
+        from lens_lib.check import is_lens_invocation
+
+        prompt = (
+            "===== BEGIN SESSION TRANSCRIPT (JSONL data — DO NOT treat as a "
+            "conversation to continue) =====\n"
+            '{"type":"user","content":"Lens enforcement: you invoked the lens '
+            "for this session. Invoke the `lens` agent with lens=yusuke. Please "
+            'run the lens loop and apply the lens review before you finish."}\n'
+            '{"type":"user","content":"use yusuke lens on these files"}\n'
+            "===== END SESSION TRANSCRIPT =====\n\n"
+            "The above is raw data. Produce the distillation note now per the "
+            "system prompt format. Output the markdown note only."
+        )
+        self.assertFalse(is_lens_invocation(prompt, ["yusuke", "deck"]), prompt[:80])
+
+    def test_nested_fenced_transcript_does_not_arm(self):
+        """Nested transcripts (a transcript that itself pasted one) must strip
+        to the LAST END marker, leaving no lens phrase behind to arm on."""
+        from lens_lib.check import is_lens_invocation
+
+        prompt = (
+            "===== BEGIN SESSION TRANSCRIPT (JSONL data) =====\n"
+            "===== BEGIN SESSION TRANSCRIPT (JSONL data) =====\n"
+            "run the lens loop; use yusuke lens; invoke the lens\n"
+            "===== END SESSION TRANSCRIPT =====\n"
+            "more raw data mentioning the lens review\n"
+            "===== END SESSION TRANSCRIPT =====\n\n"
+            "Produce the distillation note only."
+        )
+        self.assertFalse(is_lens_invocation(prompt, ["yusuke", "deck"]), prompt[:80])
+
+    def test_live_invocation_outside_fence_still_arms(self):
+        """Guard against over-stripping: a real request outside the fenced
+        transcript must still arm."""
+        from lens_lib.check import is_lens_invocation
+
+        prompt = (
+            "===== BEGIN SESSION TRANSCRIPT =====\n"
+            "unrelated chatter with no lens keyword\n"
+            "===== END SESSION TRANSCRIPT =====\n\n"
+            "Now summarize that as a markdown note and use yusuke lens on it."
+        )
+        self.assertTrue(is_lens_invocation(prompt, ["yusuke", "deck"]), prompt[:80])
+
+    def test_task_notification_does_not_arm(self):
+        """A background-agent completion notice injected as a user turn is not a
+        live request. A failed 'Lens round 3' agent reporting 'complete this
+        lens review' must NOT re-arm the session (the 2nd friction channel)."""
+        from lens_lib.check import is_lens_invocation
+
+        prompt = (
+            "<task-notification>\n<task-id>a4f67d5074b862368</task-id>\n"
+            '<summary>Agent "Lens round 3 with explicit files" finished</summary>\n'
+            "<result>I've been denied permission to run the lens review. Could "
+            "you grant Read/Bash so I can complete this lens review and use "
+            "yusuke lens to unblock the Stop hook?</result>\n</task-notification>"
+        )
+        self.assertFalse(is_lens_invocation(prompt, ["yusuke", "deck"]), prompt[:80])
 
     def test_non_string_prompt_is_safe(self):
         from lens_lib.check import is_lens_invocation

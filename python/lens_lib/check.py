@@ -60,6 +60,49 @@ _NEG_RE = re.compile(
 )
 _VERB = r"use|using|run|running|apply|applying|invoke|execute|redo\w*"
 
+# Arming must read the user's LIVE instruction, not machine-injected or quoted
+# content. Two harness wrappers were 100% of the stuck-block friction in the
+# run log — both saturate the prompt with lens phrasing that is not a request:
+#   1. Transcript-distillation prompts (lexicon et al.) fence a raw session
+#      transcript with BEGIN/END SESSION TRANSCRIPT — the transcript is full of
+#      "invoke the lens" / "Lens enforcement", arming the distiller on its own
+#      payload. Strip greedily to the LAST END marker so nested transcripts
+#      collapse; a BEGIN with no closing END drops to end-of-text.
+#   2. <task-notification> blocks (background-agent completion notices injected
+#      as a user turn) — e.g. a failed "Lens round 3" agent reporting "complete
+#      this lens review" re-arms the session.
+# Any live request OUTSIDE these wrappers is still scanned.
+_FENCE_BEGIN = re.compile(r"={3,}\s*BEGIN SESSION TRANSCRIPT\b", re.IGNORECASE)
+_FENCE_END = re.compile(r"={3,}\s*END SESSION TRANSCRIPT\s*={3,}", re.IGNORECASE)
+_TASK_NOTIF = re.compile(
+    r"<task-notification>.*?(?:</task-notification>|\Z)", re.IGNORECASE | re.DOTALL
+)
+
+
+def _strip_transcript_blocks(text: str) -> str:
+    begin = _FENCE_BEGIN.search(text)
+    if not begin:
+        return text
+    last_end = None
+    for m in _FENCE_END.finditer(text):
+        if m.start() >= begin.start():
+            last_end = m
+    if last_end is not None:
+        return text[: begin.start()] + "\n" + text[last_end.end():]
+    return text[: begin.start()]
+
+
+def _strip_injected_blocks(text: str) -> str:
+    """Remove harness-injected / quoted wrappers so arming sees only live text."""
+    return _TASK_NOTIF.sub(" ", _strip_transcript_blocks(text))
+
+
+# "lens doctor" / "lens close" (the /lens-doctor, /lens-close tooling commands,
+# whose expanded bodies say "Run the Lens doctor…") are lens *tooling*, not a
+# request to run the review lens — so a match ending in "lens" followed by one
+# of these must not arm.
+_TOOLING_AFTER = re.compile(r"[-\s]+(?:doctor|close)\b", re.IGNORECASE)
+
 
 def _negated_before(text: str, idx: int) -> bool:
     return _NEG_RE.search(text[max(0, idx - 20):idx]) is not None
@@ -69,11 +112,13 @@ def is_lens_invocation(prompt: str, known_names: Sequence[str] = ()) -> bool:
     """
     True if the prompt explicitly and affirmatively asks to run the lens.
 
-    Rejects negations/hedges ("don't use the lens", "without using the lens")
-    and unrelated senses ("eyeglasses lens metaphor", "lens documentation").
+    Rejects negations/hedges ("don't use the lens", "without using the lens"),
+    unrelated senses ("eyeglasses lens metaphor", "lens documentation"), and
+    lens phrasing quoted inside a fenced raw transcript (distillation prompts).
     """
     if not isinstance(prompt, str) or not prompt:
         return False
+    prompt = _strip_injected_blocks(prompt)
     # `(?!)` never matches — so name-based patterns are inert when no names.
     name_alt = "|".join(re.escape(n) for n in known_names if n) or r"(?!)"
     patterns = (
@@ -86,8 +131,11 @@ def is_lens_invocation(prompt: str, known_names: Sequence[str] = ()) -> bool:
     )
     for pat in patterns:
         for m in re.finditer(pat, prompt, re.IGNORECASE):
-            if not _negated_before(prompt, m.start()):
-                return True
+            if _negated_before(prompt, m.start()):
+                continue
+            if _TOOLING_AFTER.match(prompt[m.end():m.end() + 10]):
+                continue
+            return True
     return False
 
 
