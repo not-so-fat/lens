@@ -68,8 +68,6 @@ Then **Developer: Reload Window**, open any workspace, run `/lens-doctor`.
 
 Hook commands use `${CURSOR_PLUGIN_ROOT}` (plugin install dir), **not** `./python/...` relative to your project. You do **not** copy hook scripts into each workspace — one plugin install covers every folder you open.
 
-Doctor merges lens file directories into `~/.cursor/sandbox.json` `additionalReadonlyPaths`.
-
 ### Host contract (Cursor enforcement)
 
 Cursor `stop` often has little/no transcript. Enforcement needs:
@@ -114,7 +112,7 @@ Doctor fails if Claude/Cursor hook commands are workspace-relative (`./python/..
 
 ### Runner access (out-of-workspace lens files)
 
-The reviewer must read the lens files, which live outside the repo (`~/.lens/config.json` and the lens markdown in your vault). Interactive sessions approve those reads on prompt, but a **background** subagent can't prompt, so the review silently fails. Doctor pre-grants the access, per host, from the same `readonly_roots`:
+The reviewer must read the lens files, which live outside the repo (`~/.lens/config.json` and the lens markdown in your vault). Interactive sessions approve those reads on prompt, but a **background** subagent can't prompt, so the review silently fails. Doctor pre-grants the access, per host, from your configured lens directories:
 
 - **`cursor_sandbox`** — merges each lens dir into `~/.cursor/sandbox.json` `additionalReadonlyPaths`.
 - **`claude_permissions`** — adds `Read(<lens dirs>/**)`, `Read(~/.lens/**)`, and `Bash(python3 -m lens_lib append-run:*)` / `Bash(date:*)` to `~/.claude/settings.json` `permissions.allow`.
