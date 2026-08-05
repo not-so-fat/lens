@@ -344,7 +344,13 @@ def run_check(
     # stale arm; otherwise count this block and give up after ARM_MAX_BLOCKS so a
     # false/abandoned arm can't wedge the session. `armed` stays truthful for the
     # record; `arm_cleared` (surfaced via skip_reason) suppresses the block.
+    # Warn-first escalation (RC4): a prompt-text arm is a heuristic, so the first
+    # unsatisfied stop only warns; a later stop that still has no lens_run blocks
+    # (up to ARM_MAX_BLOCKS), then the breaker/TTL clear it. Genuine arms (agent
+    # runs the lens after the warning) never block; a false arm costs at most one
+    # warning before the first block.
     arm_cleared: Optional[str] = None
+    arm_warn = False
     if armed and not armed_satisfied and cfg.enforce:
         age = _arm_age_seconds(armed_ts)
         if age is not None and age > ARM_TTL_SECONDS:
@@ -353,14 +359,18 @@ def run_check(
             attempts = 0
             for sid in armed_ids:
                 attempts = max(attempts, record_arm_block(sid))
-            if attempts > ARM_MAX_BLOCKS:
+            if attempts <= 1:
+                arm_warn = True
+            elif attempts > 1 + ARM_MAX_BLOCKS:
                 arm_cleared = "arm_abandoned"
         if arm_cleared:
             for sid in armed_ids:
                 disarm_session(sid)
 
     block_writes = watched_writes and not lens_run_found
-    block_armed = armed and not armed_satisfied and arm_cleared is None
+    block_armed = (
+        armed and not armed_satisfied and arm_cleared is None and not arm_warn
+    )
     should_block = bool(cfg.enforce and (block_writes or block_armed))
 
     sess_hint = (
@@ -369,7 +379,14 @@ def run_check(
         if host == "claude-code"
         else f" Ensure the lens_run includes session={session!r}."
     )
-    if not (block_writes or block_armed):
+    if arm_warn and not block_writes:
+        message = (
+            "Lens enforcement: you invoked the lens for this session but no "
+            f"lens_run is logged yet ({armed_ts}). Run the `lens` agent before "
+            "finishing — the next stop will block until a lens_run is logged."
+            f"{sess_hint} {INVOCATION_TEMPLATE}"
+        )
+    elif not (block_writes or block_armed):
         message = ""
     elif not cfg.enforce:
         message = (
@@ -411,6 +428,8 @@ def run_check(
     skip_reason = None
     if arm_cleared:
         skip_reason = arm_cleared
+    elif arm_warn and not should_block:
+        skip_reason = "arm_warned"
     elif watched_writes and not cfg.enforce:
         skip_reason = "enforce_false"
     elif not watched_writes and written_all and not wrote_watched:

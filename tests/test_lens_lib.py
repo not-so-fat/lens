@@ -259,10 +259,16 @@ class LogAndCheckTests(unittest.TestCase):
 
                 sid = "armed-sess"
                 arm_session(sid)
+                # warn-first: the first unsatisfied stop warns without blocking
+                r = run_check(host="cursor", session_id=sid, cwd=td)
+                self.assertFalse(r.blocked, "first stop should warn, not block")
+                self.assertTrue(r.armed)
+                self.assertTrue(r.message)
+                self.assertIsNotNone(read_arm_ts(sid))
+                # then it blocks up to ARM_MAX_BLOCKS times
                 for i in range(ARM_MAX_BLOCKS):
                     r = run_check(host="cursor", session_id=sid, cwd=td)
                     self.assertTrue(r.blocked, f"block {i + 1} should fire")
-                    self.assertTrue(r.armed)
                     self.assertIsNotNone(read_arm_ts(sid))
                 # the next stop trips the breaker: no block, and the arm is gone
                 r = run_check(host="cursor", session_id=sid, cwd=td)
@@ -272,6 +278,64 @@ class LogAndCheckTests(unittest.TestCase):
                     recs = [json.loads(l) for l in f]
                 self.assertTrue(
                     any(x.get("skip_reason") == "arm_abandoned" for x in recs)
+                )
+            finally:
+                if old_home is None:
+                    os.environ.pop("HOME", None)
+                else:
+                    os.environ["HOME"] = old_home
+
+    def test_arm_warn_first_then_block(self):
+        """RC4: first unsatisfied stop warns (no block); a later stop blocks; a
+        lens_run clears the arm."""
+        with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:
+            lens = Path(td) / "lens.md"
+            log = Path(td) / "runs.jsonl"
+            lens.write_text(SAMPLE)
+            home = Path(td) / "home"
+            home.mkdir()
+            old_home = os.environ.get("HOME")
+            os.environ["HOME"] = str(home)
+            os.environ.pop("LENS_LOG_PATH", None)
+            try:
+                write_config(
+                    str(log),
+                    lenses={"review": str(lens)},
+                    default_lens="review",
+                    enforce=True,
+                )
+                from lens_lib.check import arm_session, read_arm_ts
+
+                sid = "warn-sess"
+                arm_session(sid)
+                r1 = run_check(host="cursor", session_id=sid, cwd=td)
+                self.assertFalse(r1.blocked, "first stop warns, does not block")
+                self.assertTrue(r1.message)
+                r2 = run_check(host="cursor", session_id=sid, cwd=td)
+                self.assertTrue(r2.blocked, "second unsatisfied stop blocks")
+                # a logged lens_run clears the arm on the next stop
+                append_record(
+                    log,
+                    {
+                        "ts": "2999-01-01T00:00:00Z",
+                        "event": "lens_run",
+                        "lens": "review",
+                        "deliverable": "chat-note",
+                        "rounds": 1,
+                        "verdict": "pass",
+                        "host": "cursor",
+                        "session": sid,
+                        "findings": [],
+                        "escalations": [],
+                    },
+                )
+                r3 = run_check(host="cursor", session_id=sid, cwd=td)
+                self.assertFalse(r3.blocked)
+                self.assertIsNone(read_arm_ts(sid))
+                with open(log) as f:
+                    recs = [json.loads(l) for l in f]
+                self.assertTrue(
+                    any(x.get("skip_reason") == "arm_warned" for x in recs)
                 )
             finally:
                 if old_home is None:
