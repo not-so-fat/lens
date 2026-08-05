@@ -1,0 +1,98 @@
+"""Grant the Claude Code lens runner its out-of-workspace access.
+
+The reviewer subagent must Read the lens files (which live outside the repo —
+`~/.lens/config.json` and the lens markdown under the owner's vault) and the run
+is appended via the plugin CLI. In an interactive session the user approves those
+prompts; a **background** subagent cannot prompt, so the calls auto-deny and the
+review can't run. This is the claude-code analog of the Cursor sandbox
+(`sandbox.py`): it pre-grants the access in `~/.claude/settings.json` so no prompt
+is needed. Shares `readonly_roots(cfg)` with the Cursor path — one source of truth
+for "which dirs the runner reads".
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any, Dict, List, Tuple
+
+from .config import Config, readonly_roots
+from .util import claude_home, expand_path
+
+
+def settings_path() -> Path:
+    """Global Claude settings — mirrors the global ~/.cursor/sandbox.json."""
+    return claude_home() / "settings.json"
+
+
+def _read_entry(target: Path) -> str:
+    """A Read() allow rule for a directory, tilde-relative under $HOME."""
+    ap = str(expand_path(str(target)))
+    home = str(expand_path("~"))
+    if ap == home or ap.startswith(home + "/"):
+        return f"Read(~{ap[len(home):]}/**)"
+    return f"Read(//{ap.lstrip('/')}/**)"
+
+
+def required_allow(cfg: Config) -> List[str]:
+    """Permission allow-rules the runner needs, in a stable order."""
+    entries: List[str] = [_read_entry(root) for root in readonly_roots(cfg)]
+    # config + run log live under ~/.lens
+    entries.append("Read(~/.lens/**)")
+    # a terminal round appends the lens_run via the plugin CLI, with a real ts
+    entries.append("Bash(python3 -m lens_lib append-run:*)")
+    entries.append("Bash(date:*)")
+    seen: set = set()
+    out: List[str] = []
+    for e in entries:
+        if e not in seen:
+            seen.add(e)
+            out.append(e)
+    return out
+
+
+def _load() -> Dict[str, Any]:
+    path = settings_path()
+    if path.is_file():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return data
+        except json.JSONDecodeError:
+            pass
+    return {}
+
+
+def _current_allow() -> List[str]:
+    perms = _load().get("permissions")
+    if isinstance(perms, dict) and isinstance(perms.get("allow"), list):
+        return list(perms["allow"])
+    return []
+
+
+def missing_allow(cfg: Config) -> List[str]:
+    have = set(_current_allow())
+    return [e for e in required_allow(cfg) if e not in have]
+
+
+def ensure_allow(cfg: Config) -> Tuple[Path, bool]:
+    """Merge the required allow-rules into settings.json. Returns (path, changed)."""
+    path = settings_path()
+    data = _load()
+    perms = data.get("permissions")
+    if not isinstance(perms, dict):
+        perms = {}
+    allow: List[str] = list(perms.get("allow") or [])
+    have = set(allow)
+    changed = False
+    for e in required_allow(cfg):
+        if e not in have:
+            allow.append(e)
+            have.add(e)
+            changed = True
+    if changed:
+        perms["allow"] = allow
+        data["permissions"] = perms
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return path, changed

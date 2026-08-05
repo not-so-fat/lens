@@ -618,5 +618,92 @@ class LensInvocationDetectionTests(unittest.TestCase):
         self.assertFalse(is_lens_invocation(["use", "lens"], ["yusuke"]))
 
 
+class ClaudePermissionsTests(unittest.TestCase):
+    """The claude-code analog of the Cursor sandbox: pre-grant the runner's
+    out-of-workspace Read + append Bash so a background subagent needn't prompt."""
+
+    def test_grants_lens_read_and_append_idempotently(self):
+        with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:
+            home = Path(td) / "home"
+            home.mkdir()
+            lensdir = Path(td) / "lenses"
+            lensdir.mkdir()
+            lens = lensdir / "yusuke.md"
+            lens.write_text(SAMPLE)
+            log = Path(td) / "runs.jsonl"
+            old_home = os.environ.get("HOME")
+            os.environ["HOME"] = str(home)
+            os.environ.pop("LENS_LOG_PATH", None)
+            try:
+                write_config(
+                    str(log), lenses={"yusuke": str(lens)}, default_lens="yusuke"
+                )
+                from lens_lib.claude_perms import (
+                    ensure_allow,
+                    missing_allow,
+                    required_allow,
+                    settings_path,
+                )
+
+                cfg = resolve_config()
+                req = required_allow(cfg)
+                self.assertIn("Read(~/.lens/**)", req)
+                self.assertTrue(any("append-run" in e for e in req))
+                self.assertTrue(any("lenses" in e and e.startswith("Read(") for e in req))
+                # before the fix every grant is missing
+                self.assertEqual(missing_allow(cfg), req)
+                path, changed = ensure_allow(cfg)
+                self.assertTrue(changed)
+                self.assertEqual(path, settings_path())
+                self.assertEqual(missing_allow(cfg), [])
+                # idempotent
+                _, changed2 = ensure_allow(cfg)
+                self.assertFalse(changed2)
+            finally:
+                if old_home is None:
+                    os.environ.pop("HOME", None)
+                else:
+                    os.environ["HOME"] = old_home
+
+    def test_preserves_existing_allow(self):
+        with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:
+            home = Path(td) / "home"
+            (home / ".claude").mkdir(parents=True)
+            (home / ".claude" / "settings.json").write_text(
+                json.dumps(
+                    {
+                        "permissions": {
+                            "allow": ["mcp__agent-deck__*"],
+                            "defaultMode": "auto",
+                        }
+                    }
+                )
+            )
+            lens = Path(td) / "yusuke.md"
+            lens.write_text(SAMPLE)
+            log = Path(td) / "runs.jsonl"
+            old_home = os.environ.get("HOME")
+            os.environ["HOME"] = str(home)
+            os.environ.pop("LENS_LOG_PATH", None)
+            try:
+                write_config(
+                    str(log), lenses={"yusuke": str(lens)}, default_lens="yusuke"
+                )
+                from lens_lib.claude_perms import ensure_allow, settings_path
+
+                cfg = resolve_config()
+                ensure_allow(cfg)
+                with open(settings_path()) as f:
+                    data = json.load(f)
+                self.assertIn("mcp__agent-deck__*", data["permissions"]["allow"])
+                self.assertEqual(data["permissions"].get("defaultMode"), "auto")
+                self.assertIn("Read(~/.lens/**)", data["permissions"]["allow"])
+            finally:
+                if old_home is None:
+                    os.environ.pop("HOME", None)
+                else:
+                    os.environ["HOME"] = old_home
+
+
 if __name__ == "__main__":
     unittest.main()

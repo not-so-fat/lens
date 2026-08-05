@@ -112,6 +112,15 @@ Not yet on **Cursor** (no prompt-submit arming wired — tracked in [`docs/ISSUE
 
 Doctor fails if Claude/Cursor hook commands are workspace-relative (`./python/...`) or if `${CLAUDE_PLUGIN_ROOT}` / `${CURSOR_PLUGIN_ROOT}` do not expand to real scripts under the plugin install.
 
+### Runner access (out-of-workspace lens files)
+
+The reviewer must read the lens files, which live outside the repo (`~/.lens/config.json` and the lens markdown in your vault). Interactive sessions approve those reads on prompt, but a **background** subagent can't prompt, so the review silently fails. Doctor pre-grants the access, per host, from the same `readonly_roots`:
+
+- **`cursor_sandbox`** — merges each lens dir into `~/.cursor/sandbox.json` `additionalReadonlyPaths`.
+- **`claude_permissions`** — adds `Read(<lens dirs>/**)`, `Read(~/.lens/**)`, and `Bash(python3 -m lens_lib append-run:*)` / `Bash(date:*)` to `~/.claude/settings.json` `permissions.allow`.
+
+Both are written by `/lens-doctor` (fix mode); `--no-fix-sandbox` only reports gaps. Writing Claude grants widens auto-approve permissions, so if the agent's own run is blocked by a self-modification guard, run `/lens-doctor` yourself. (**Codex**: the equivalent — `writable_roots` / `sandbox_mode` — is deferred with the rest of the Codex port, see `docs/PRD.md`.)
+
 ## Unlocking Cursor stop follow-ups (`loop_limit`)
 
 Cursor does **not** hard-block forever. The `stop` hook may send `followup_message` up to `loop_limit` times (default **5**). After that, the agent can stop even if no `lens_run` was logged (`hook_limit_exhausted` in the run log).
