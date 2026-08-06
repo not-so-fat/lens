@@ -12,7 +12,7 @@ status: refining
 
 ## Decision
 
-**Pursue.** Next action: one private repo carrying the Claude Code plugin **and Cursor support**, installed on both laptops — the deployment itself is the MVP test (implementation spec: the plugin PRD below). Codex is evaluated but out of scope (Appendix B). The deck card comes after, gated on `human_review` pilot data. No standalone product (rationale in Positioning).
+**Pursue.** Next action: one public repo carrying the Claude Code plugin **and Cursor support**, installed on both laptops — the deployment itself is the MVP test (implementation spec: the plugin PRD below). Codex is evaluated but out of scope (Appendix B). The deck card comes after, gated on `human_review` pilot data. No standalone product (rationale in Positioning).
 
 ## Problem
 
@@ -45,7 +45,7 @@ status: refining
 ## Deployment path (personal need first)
 
 1. **Now:** file-based v0 — lens as a local markdown file, runner as a local agent file, one laptop.
-2. **Next: one private repo — Claude Code plugin + Cursor plugin** — any laptop, one install per host; named lenses configured in `~/.lens/config.json`. Spec: the plugin PRD below.
+2. **Next: one public repo — Claude Code plugin + Cursor plugin** — any laptop, one install per host; named lenses configured in `~/.lens/config.json`. Spec: the plugin PRD below.
 3. **Then:** lens as an Agent Deck card — per-business lens switching via deck binding; Codex reached through the existing deck MCP + stub machinery (feasibility evaluated below).
 
 ## Positioning
@@ -67,7 +67,7 @@ Agent Deck is context switching; a lens is judgment that must travel with that c
 
 - **Blocks the deck card** — lens body's home: deck card vs local file (one source of truth — the no-mirroring rule forces a choice).
 - **Resolved for the plugin release by exclusion (§10); reopens at the deck card** — per-surface enforcement gaps: Cursor CLI (hook delivery unreliable) is excluded from the plugin release; the Codex IDE extension (hooks undocumented) remains a deck-card question; the run log's skip rate is the evidence to collect.
-- **Shapes the plugin step, worth arguing** — privacy: lenses encode work context; multi-laptop sync must stay private (private repo suffices? deck sync changes the answer).
+- **Shapes the plugin step, worth arguing** — privacy: lenses encode work context, so the lens *files* must stay private — but they live in the owner's vault, resolved by absolute path from `~/.lens/config.json`, never committed here. The plugin repo carries only machinery, so it can be public; only a future deck-sync path would put lens content anywhere shared.
 - **Blocks nothing yet** — team lenses: can a team share standards the way one person does, and who reviews the reviewer?
 - **Shapes the plugin's coverage, worth arguing** — enforcement scope: the Stop-hook gate is write-triggered. An **explicit** request (*"use yusuke lens"*) on a chat deliverable is now enforced via `UserPromptSubmit` arming (see [`docs/ISSUES.md`](ISSUES.md) I-9). Still open: **passive** coverage of chat work the user did not explicitly flag — firing the lens on every Stop is noisy, so pilot skip data is the evidence to collect. Files written via Bash (not the Write tool) also remain invisible.
 
@@ -81,7 +81,7 @@ Implementation half (scaffold: pb_prd_scaffold). Everything above is the framing
 
 ## 1. Product overview
 
-Scope: package the proven v0 loop (runner agent + named lens files + run log) into one private repo that installs on any machine — a Claude Code plugin (`.claude-plugin/`) and a Cursor plugin (`.cursor-plugin/`, **desktop IDE**; the CLI surface is excluded, §10) sharing config, contracts, and the run log — so the loop cannot be silently skipped on either host's covered surface. Codex: out of scope, port sketch in Appendix B.
+Scope: package the proven v0 loop (runner agent + named lens files + run log) into one public repo that installs on any machine — a Claude Code plugin (`.claude-plugin/`) and a Cursor plugin (`.cursor-plugin/`, **desktop IDE**; the CLI surface is excluded, §10) sharing config, contracts, and the run log — so the loop cannot be silently skipped on either host's covered surface. Codex: out of scope, port sketch in Appendix B.
 
 **Success criteria (evaluated at M3 — seven days after hook activation):** plugin installed and passing `/lens-doctor` on 2 laptops; Stop-hook enforcement active on both hosts (Cursor: desktop IDE); ≥ 90% of `hook_check` records with `enforce=true` and `wrote_watched=true` also have `blocked=false` (§7.6, measurement window per §9, min 10 such records, both hosts pooled — Cursor prune means `watched_writes∧lens_run_found` is the wrong join); ≥ 1 `lens_run` logged from Cursor (`host: "cursor"`); ≥ 5 deliverables carry `human_review` lines.
 
@@ -103,7 +103,7 @@ Deferred roles (team members, Codex host): see §10.
 
 **US-1 (plugin). Install on a new laptop.** As a lens owner, I want one-command install so my standards travel.
 Acceptance:
-- [ ] `claude plugin marketplace add <private-repo>` + `claude plugin install lens` succeeds on a clean machine with repo access
+- [ ] `claude plugin marketplace add not-so-fat/lens` + `claude plugin install lens@lens-plugins` succeeds on a clean machine (public marketplace — no repo access needed)
 - [ ] a new session lists the `lens` agent
 - [ ] `/lens-doctor` exits green after writing `~/.lens/config.json` with named `lenses` (or `lenses_dir`), `default_lens`, and `log_path`
 
@@ -154,7 +154,7 @@ Deferred stories (deck card fetch, Codex host, correction-capture automation): s
 
 | Req | Requirement | Acceptance |
 | --- | --- | --- |
-| F1.1 | Private git repo is a dual marketplace: `.claude-plugin/marketplace.json` + `.cursor-plugin/marketplace.json`, each offering plugin `lens` with agents, hooks, commands | US-1 / US-6 install paths pass on macOS |
+| F1.1 | Public git repo is a dual marketplace: `.claude-plugin/marketplace.json` + `.cursor-plugin/marketplace.json`, each offering plugin `lens` with agents, hooks, commands | US-1 / US-6 install paths pass on macOS |
 | F1.2 | Config is `~/.lens/config.json` (§7.4): named `lenses` and/or `lenses_dir`, `default_lens`, `log_path`; env `LENS_LOG_PATH` / `LENS_DEFAULT` override log path / default name → else error with setup instructions | `/lens-doctor` reports source, default, and known names |
 | F1.3 | All hook/command scripts are Python 3 stdlib-only | `grep`-verifiable: no third-party imports |
 | F1.4 | Named-lens management CLI: `python -m lens_lib lens add\|list\|remove` | US-2b acceptance |
@@ -184,7 +184,7 @@ Deferred stories (deck card fetch, Codex host, correction-capture automation): s
 | --- | --- | --- |
 | F4.1 | Log lives at config `log_path`; append-only; created on first write | 100% of pilot writes are single-line appends (NFR-2) |
 | F4.2 | `/lens-close` command appends a §7.2 record; refuses a deliverable key with no `lens_run` | US-5 acceptance |
-| F4.3 | `/lens-doctor` validates: config resolvable, every known named lens parses per §7.5, log writable, host hooks present, Cursor sandbox roots for lens directories | exits non-zero with a named failing check |
+| F4.3 | `/lens-doctor` validates: config resolvable, every known named lens parses per §7.5, log writable, host hooks present, Cursor sandbox roots for lens directories, and (`marketplace_source`) that a `directory`-source lens marketplace — the local-dev install mode — does not point at a moved/deleted path | exits non-zero with a named failing check |
 
 ### F5 — Cursor support
 
@@ -197,7 +197,7 @@ Deferred stories (deck card fetch, Codex host, correction-capture automation): s
 
 ## 5. Pricing model
 
-Not applicable — the plugin hosts, proxies, and bills nothing; it is a free personal tool distributed via a private repo.
+Not applicable — the plugin hosts, proxies, and bills nothing; it is a free personal tool distributed via a public GitHub marketplace.
 
 ## 6. Design principles
 
@@ -359,7 +359,7 @@ Shares the run-log file; analyses select by `event`, so the newest-record-per-de
 - Python 3 stdlib only for hooks/commands (F1.3); no network calls anywhere in the plugin release — lens bodies are local files; sync is the owner's choice (git, sync disk, etc.).
 - No Lexicon/`vault`/`area` concepts in config or contracts — only named lenses, absolute file paths, and `log_path`.
 - macOS is the only supported OS in the plugin release.
-- Private GitHub repo preferred; install auth = existing git credentials.
+- Public GitHub marketplace; no repo access or auth required to install. Lens content stays private in the owner's vault, not in this repo.
 - Codegen consumption: this document **is** `docs/PRD.md`; repo `CLAUDE.md` points agents at it and at `contracts/`; the historical v0 agent (`~/.claude/agents/lens.md`) was the reference for the first port (F2.1) — the in-repo runners are now canonical.
 
 ## 9. Non-functional requirements

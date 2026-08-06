@@ -1,6 +1,6 @@
 # Lens
 
-Personal review standards for AI agents. One private repo installs on any Mac as a **Claude Code plugin** and a **Cursor plugin**, sharing config, contracts, and a JSONL run log.
+Personal review standards for AI agents. One public repo installs on any Mac as a **Claude Code plugin** and a **Cursor plugin**, sharing config, contracts, and a JSONL run log. (The repo carries only plugin machinery — your lens *content* stays private in your own vault, never here.)
 
 Canonical product + implementation spec: [`docs/PRD.md`](docs/PRD.md). Open implementation residuals: [`docs/ISSUES.md`](docs/ISSUES.md). Cutting a version: [`docs/RELEASE.md`](docs/RELEASE.md).
 
@@ -41,30 +41,62 @@ Optional `lenses_dir`: drop `<name>.md` into a folder and invoke with that name 
 
 Env: `LENS_LOG_PATH`, `LENS_DEFAULT` (default lens name).
 
-## Install — Claude Code
+## Install
+
+Lens is a **public GitHub marketplace**. Both hosts copy the plugin into their own
+store (`~/.claude/plugins/cache/…` / Cursor's plugin dir), so **you keep no clone** —
+there is nothing to move, and a relocated or deleted checkout can't break an install.
+
+### Claude Code
 
 ```bash
-claude plugin marketplace add not-so-fat/lens   # or local path / git URL
+claude plugin marketplace add not-so-fat/lens
 claude plugin install lens@lens-plugins
 ```
 
 New session should list the `lens` agent. Run `/lens-doctor`.
 
-## Install — Cursor (desktop IDE)
+### Cursor (desktop IDE)
 
-**Local (verified):** pin a tag, copy into Cursor’s local plugins dir (do not symlink outside that tree — Cursor rejects it), reload, then doctor:
+Cursor → Customize → Plugins → **Import marketplace** → `https://github.com/not-so-fat/lens`
+(optionally pin a tag, e.g. `…/lens@v0.1.2`), install `lens`, then **Developer: Reload
+Window** and run `/lens-doctor`. One import covers every workspace — no per-folder setup.
+
+### Updating
 
 ```bash
-git clone https://github.com/not-so-fat/lens.git /tmp/lens && cd /tmp/lens
-git checkout v0.1.1
-rm -rf ~/.cursor/plugins/local/lens
-mkdir -p ~/.cursor/plugins/local/lens
-git archive v0.1.1 | tar -x -C ~/.cursor/plugins/local/lens
+claude plugin marketplace update lens-plugins   # refresh the catalog from GitHub
+claude plugin update lens@lens-plugins          # pull the new version
 ```
 
-Then **Developer: Reload Window**, open any workspace, run `/lens-doctor`.
+Cursor: re-import (or reload) the marketplace. Releases are versioned by the `version`
+field in `plugin.json` / `marketplace.json`, so an update lands only after that version
+is **bumped** — pushing commits alone won't change what `plugin update` sees (cutting a
+release: [`docs/RELEASE.md`](docs/RELEASE.md)).
 
-**Team Marketplace:** Cursor → Customize → Plugins → Import marketplace → `https://github.com/not-so-fat/lens` (or pin the `v0.1.1` tag), install `lens`, reload, `/lens-doctor`.
+### Local development (plugin authors only)
+
+To iterate without publishing:
+
+**Claude Code** — add the repo itself as a `directory`-source marketplace:
+
+```bash
+claude plugin marketplace add /path/to/lens   # directory source — dev only
+claude plugin install lens@lens-plugins
+```
+
+**Cursor** — no directory-source CLI exists; copy a checkout into Cursor's local plugin
+dir (don't symlink outside that tree — Cursor rejects it), then **Developer: Reload Window**:
+
+```bash
+rm -rf ~/.cursor/plugins/local/lens && mkdir -p ~/.cursor/plugins/local/lens
+git archive HEAD | tar -x -C ~/.cursor/plugins/local/lens   # or a pinned tag
+```
+
+The Claude Code `directory` source is the **only** install mode bound to a local path. If
+you move or delete that repo, re-point it (`claude plugin marketplace add <new-path>`) and
+rerun `/lens-doctor` — its `marketplace_source` check flags a stale directory source.
+End-user marketplace installs above are never affected.
 
 Hook commands use `${CURSOR_PLUGIN_ROOT}` (plugin install dir), **not** `./python/...` relative to your project. You do **not** copy hook scripts into each workspace — one plugin install covers every folder you open.
 
@@ -108,7 +140,7 @@ Not yet on **Cursor** (no prompt-submit arming wired — tracked in [`docs/ISSUE
 /lens-doctor
 ```
 
-Doctor fails if Claude/Cursor hook commands are workspace-relative (`./python/...`) or if `${CLAUDE_PLUGIN_ROOT}` / `${CURSOR_PLUGIN_ROOT}` do not expand to real scripts under the plugin install.
+Doctor fails if Claude/Cursor hook commands are workspace-relative (`./python/...`) or if `${CLAUDE_PLUGIN_ROOT}` / `${CURSOR_PLUGIN_ROOT}` do not expand to real scripts under the plugin install. The `marketplace_source` check also fails when a `directory`-source lens marketplace (dev install) points at a moved/deleted path, and prints the re-point command.
 
 ### Runner access (out-of-workspace lens files)
 
