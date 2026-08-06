@@ -1,6 +1,6 @@
 # Lens
 
-Personal review standards for AI agents — Claude Code plugin + Cursor plugin in one private repo.
+Personal review standards for AI agents — Claude Code plugin + Cursor plugin in one public repo (lens content stays private in the owner's vault, not here).
 
 ## For coding agents
 

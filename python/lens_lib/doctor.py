@@ -205,6 +205,51 @@ def _hooks_registered_cursor(plugin_root: Optional[Path]) -> tuple[bool, str]:
     return False, "Cursor stop hook not found (import lens plugin / Team Marketplace)"
 
 
+def _lens_marketplace_source(registry: Optional[Path] = None) -> tuple[bool, str]:
+    """Warn when a directory-source marketplace that provides lens points at a
+    path that no longer exists.
+
+    Only the local-development install uses a ``directory`` marketplace source.
+    If that repo is moved or deleted the cached plugin keeps running, but the
+    next ``plugin marketplace update`` fails and enforcement can silently lapse
+    on the following startup. A github-source install carries no local path and
+    passes trivially, so end users never hit this.
+    """
+    reg = registry or (claude_home() / "plugins" / "known_marketplaces.json")
+    if not reg.is_file():
+        return True, "no Claude marketplace registry (skip)"
+    try:
+        data = json.loads(reg.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        return True, f"marketplace registry unreadable (skip): {e}"
+    if not isinstance(data, dict):
+        return True, "marketplace registry not an object (skip)"
+
+    stale: List[str] = []
+    for name, entry in data.items():
+        if not isinstance(entry, dict):
+            continue
+        src = entry.get("source")
+        if not isinstance(src, dict) or src.get("source") != "directory":
+            continue
+        if "lens" not in str(name).lower():
+            continue
+        path = src.get("path") or entry.get("installLocation")
+        if not isinstance(path, str) or not path:
+            continue
+        if not expand_path(path).is_dir():
+            stale.append(f"{name!r} → {path}")
+
+    if stale:
+        return False, (
+            "directory-source marketplace path missing (" + "; ".join(stale) + "); "
+            "the repo was moved or deleted — re-point with "
+            "`claude plugin marketplace add not-so-fat/lens` (public) or "
+            "`claude plugin marketplace add <new-repo-path>`, then rerun /lens-doctor"
+        )
+    return True, "marketplace sources resolve"
+
+
 def run_doctor(
     *,
     fix_sandbox: bool = True,
@@ -290,6 +335,9 @@ def run_doctor(
     report.add("claude_hooks", ok_c, detail_c)
     ok_u, detail_u = _hooks_registered_cursor(plugin_root)
     report.add("cursor_hooks", ok_u, detail_u)
+
+    ok_m, detail_m = _lens_marketplace_source()
+    report.add("marketplace_source", ok_m, detail_m)
 
     roots = readonly_roots(cfg)
     if not roots:

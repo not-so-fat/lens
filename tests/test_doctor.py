@@ -160,5 +160,77 @@ class HookWiringTests(unittest.TestCase):
         self.assertTrue(ok, detail)
 
 
+class MarketplaceSourceTests(unittest.TestCase):
+    """Doctor must flag a moved/deleted directory-source lens marketplace."""
+
+    def _write(self, td: Path, registry: dict) -> Path:
+        reg = td / "known_marketplaces.json"
+        reg.write_text(json.dumps(registry))
+        return reg
+
+    def test_stale_directory_source_fails(self):
+        from lens_lib.doctor import _lens_marketplace_source
+
+        with tempfile.TemporaryDirectory(dir=str(ROOT)) as td_s:
+            td = Path(td_s)
+            reg = self._write(
+                td,
+                {
+                    "lens-plugins": {
+                        "source": {"source": "directory", "path": str(td / "gone")},
+                        "installLocation": str(td / "gone"),
+                    }
+                },
+            )
+            ok, detail = _lens_marketplace_source(reg)
+            self.assertFalse(ok, detail)
+            self.assertIn("marketplace add", detail)
+
+    def test_present_directory_source_passes(self):
+        from lens_lib.doctor import _lens_marketplace_source
+
+        with tempfile.TemporaryDirectory(dir=str(ROOT)) as td_s:
+            td = Path(td_s)
+            here = td / "lens-repo"
+            here.mkdir()
+            reg = self._write(
+                td,
+                {"lens-plugins": {"source": {"source": "directory", "path": str(here)}}},
+            )
+            ok, detail = _lens_marketplace_source(reg)
+            self.assertTrue(ok, detail)
+
+    def test_github_source_passes(self):
+        from lens_lib.doctor import _lens_marketplace_source
+
+        with tempfile.TemporaryDirectory(dir=str(ROOT)) as td_s:
+            td = Path(td_s)
+            reg = self._write(
+                td,
+                {"lens-plugins": {"source": {"source": "github", "repo": "not-so-fat/lens"}}},
+            )
+            ok, detail = _lens_marketplace_source(reg)
+            self.assertTrue(ok, detail)
+
+    def test_non_lens_directory_source_ignored(self):
+        from lens_lib.doctor import _lens_marketplace_source
+
+        with tempfile.TemporaryDirectory(dir=str(ROOT)) as td_s:
+            td = Path(td_s)
+            reg = self._write(
+                td,
+                {"other": {"source": {"source": "directory", "path": str(td / "gone")}}},
+            )
+            ok, detail = _lens_marketplace_source(reg)
+            self.assertTrue(ok, detail)
+
+    def test_missing_registry_skips(self):
+        from lens_lib.doctor import _lens_marketplace_source
+
+        with tempfile.TemporaryDirectory(dir=str(ROOT)) as td_s:
+            ok, detail = _lens_marketplace_source(Path(td_s) / "nope.json")
+            self.assertTrue(ok, detail)
+
+
 if __name__ == "__main__":
     unittest.main()
