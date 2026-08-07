@@ -53,7 +53,7 @@
     },
     "duration_ms": { "type": "number", "minimum": 0 },
     "host": {
-      "enum": ["claude-code", "cursor"],
+      "enum": ["claude-code", "cursor", "codex"],
       "description": "absent in records written before Cursor support = claude-code"
     }
   },

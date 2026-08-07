@@ -1,6 +1,6 @@
 # Lens
 
-Personal review standards for AI agents. One public repo installs on any Mac as a **Claude Code plugin** and a **Cursor plugin**, sharing config, contracts, and a JSONL run log. (The repo carries only plugin machinery — your lens *content* stays private in your own vault, never here.)
+Personal review standards for AI agents. One public repo installs on any Mac as a **Claude Code plugin**, a **Cursor plugin**, and **Codex support** (CLI + desktop), sharing config, contracts, and a JSONL run log. (The repo carries only plugin machinery — your lens *content* stays private in your own vault, never here.)
 
 Canonical product + implementation spec: [`docs/PRD.md`](docs/PRD.md). Open implementation residuals: [`docs/ISSUES.md`](docs/ISSUES.md). Cutting a version: [`docs/RELEASE.md`](docs/RELEASE.md).
 
@@ -61,6 +61,20 @@ New session should list the `lens` agent. Run `/lens-doctor`.
 Cursor → Customize → Plugins → **Import marketplace** → `https://github.com/not-so-fat/lens`
 (optionally pin a tag, e.g. `…/lens@v0.1.2`), install `lens`, then **Developer: Reload
 Window** and run `/lens-doctor`. One import covers every workspace — no per-folder setup.
+
+### Codex (CLI + desktop)
+
+Codex has no marketplace, so its install is **doctor-managed**: from a checkout, run
+`/lens-doctor` (or `python3 -m lens_lib doctor`) once. Doctor renders the reviewer
+(`~/.codex/agents/lens.toml`) and the hooks (`~/.codex/hooks.json` — `Stop`,
+`PostToolUse`, `UserPromptSubmit`) with **absolute** script paths, merging your existing
+`~/.codex/hooks.json` non-destructively. It only touches `~/.codex/` if that directory
+already exists, so a Codex-free machine is left alone. Re-run `/lens-doctor` after pulling
+a new version to re-render the paths. The IDE extension is unsupported (hooks undocumented).
+
+If you run Codex in `sandbox_mode = "workspace-write"`, add your log dir to
+`writable_roots` so the worker can append the run log without an approval prompt —
+`/lens-doctor`'s `codex_writable_roots` check prints the exact snippet.
 
 ### Updating
 
@@ -130,9 +144,9 @@ On a terminal round it appends one `lens_run` (field `lens` = name) to `log_path
 
 ### Chat deliverables & explicit invocation
 
-Enforcement normally fires on writes to `watch_globs` files. A deliverable produced **in the chat** (analysis, comparison, summary) writes no file, so the write gate can't see it. But on **Claude Code**, when you **explicitly ask for the lens** — e.g. `use yusuke lens`, `lens=deck`, `run the lens`, `with yusuke lens` — a `UserPromptSubmit` hook **arms** the session: the Stop hook then requires a `lens_run` for it, **regardless of writes**, and disarms once the run lands. Because a prompt-text arm is a heuristic, enforcement is warn-first — the first unsatisfied stop only warns, a later one blocks — and self-clearing (a 3-block circuit breaker + a 2 h TTL) so a false or abandoned arm can't wedge the session. So an explicit request is enforced for chat work too. (Negated/hedged mentions — "don't use the lens" — do not arm.)
+Enforcement normally fires on writes to `watch_globs` files. A deliverable produced **in the chat** (analysis, comparison, summary) writes no file, so the write gate can't see it. But on **Claude Code and Codex**, when you **explicitly ask for the lens** — e.g. `use yusuke lens`, `lens=deck`, `run the lens`, `with yusuke lens` — a `UserPromptSubmit` hook **arms** the session: the Stop hook then requires a `lens_run` for it, **regardless of writes**, and disarms once the run lands. Because a prompt-text arm is a heuristic, enforcement is warn-first — the first unsatisfied stop only warns, a later one blocks — and self-clearing (a 3-block circuit breaker + a 2 h TTL) so a false or abandoned arm can't wedge the session. So an explicit request is enforced for chat work too. (Negated/hedged mentions — "don't use the lens" — do not arm.)
 
-Not yet on **Cursor** (no prompt-submit arming wired — tracked in [`docs/ISSUES.md`](docs/ISSUES.md) I-9); and a chat deliverable you did *not* explicitly flag is still not auto-enforced on either host. Set `"enforce": false` to pause all blocking.
+Not yet on **Cursor** (no prompt-submit arming wired — tracked in [`docs/ISSUES.md`](docs/ISSUES.md) I-9); and a chat deliverable you did *not* explicitly flag is still not auto-enforced on any host. Set `"enforce": false` to pause all blocking.
 
 ## Doctor
 
@@ -140,16 +154,17 @@ Not yet on **Cursor** (no prompt-submit arming wired — tracked in [`docs/ISSUE
 /lens-doctor
 ```
 
-Doctor fails if Claude/Cursor hook commands are workspace-relative (`./python/...`) or if `${CLAUDE_PLUGIN_ROOT}` / `${CURSOR_PLUGIN_ROOT}` do not expand to real scripts under the plugin install. The `marketplace_source` check also fails when a `directory`-source lens marketplace (dev install) points at a moved/deleted path, and prints the re-point command.
+Doctor fails if Claude/Cursor/Codex hook commands are workspace-relative (`./python/...`) or if `${CLAUDE_PLUGIN_ROOT}` / `${CURSOR_PLUGIN_ROOT}` / `${CODEX_PLUGIN_ROOT}` do not expand to real scripts. The `marketplace_source` check also fails when a `directory`-source lens marketplace (dev install) points at a moved/deleted path, and prints the re-point command. When `~/.codex/` exists, `codex_install` renders the reviewer + hooks into it and `codex_writable_roots` checks log-dir writability.
 
 ### Runner access (out-of-workspace lens files)
 
 The reviewer must read the lens files, which live outside the repo (`~/.lens/config.json` and the lens markdown in your vault). Interactive sessions approve those reads on prompt, but a **background** subagent can't prompt, so the review silently fails. Doctor pre-grants the access, per host, from your configured lens directories:
 
 - **`cursor_sandbox`** — merges each lens dir into `~/.cursor/sandbox.json` `additionalReadonlyPaths`.
+- **`codex_install` / `codex_writable_roots`** — renders the reviewer + hooks into `~/.codex/` (absolute paths) and, in `workspace-write` mode, checks the log dir is in `writable_roots` (Codex file reads are unrestricted, so lens files need no read-grant).
 - **`claude_permissions`** — adds `Read(<lens dirs>/**)`, `Read(~/.lens/**)`, `Bash(python3 "${CLAUDE_PLUGIN_ROOT}/python/lens_append.py":*)` (plus a resolved-absolute variant of the same launcher), and `Bash(date:*)` to `~/.claude/settings.json` `permissions.allow`. The append launcher is a bare `python3 <path>` (no leading `PYTHONPATH=`) so a background reviewer subagent can run it without a prompt — Claude allow-rules don't match past an env-var assignment. Both grant forms are emitted so the match holds whether the permission matcher compares the command before or after `${CLAUDE_PLUGIN_ROOT}` expansion.
 
-Both are written by `/lens-doctor` (fix mode); `--no-fix-sandbox` only reports gaps. Writing Claude grants widens auto-approve permissions, so if the agent's own run is blocked by a self-modification guard, run `/lens-doctor` yourself. (**Codex**: the equivalent — `writable_roots` / `sandbox_mode` — is deferred with the rest of the Codex port, see `docs/PRD.md`.)
+Both are written by `/lens-doctor` (fix mode); `--no-fix-sandbox` only reports gaps. Writing Claude grants widens auto-approve permissions, so if the agent's own run is blocked by a self-modification guard, run `/lens-doctor` yourself. (**Codex**: the equivalent is `codex_install` + `codex_writable_roots`, also written by `/lens-doctor` fix mode — see the Codex install section above and F6 in `docs/PRD.md`.)
 
 ## Unlocking Cursor stop follow-ups (`loop_limit`)
 

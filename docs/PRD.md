@@ -12,7 +12,7 @@ status: refining
 
 ## Decision
 
-**Pursue.** Next action: one public repo carrying the Claude Code plugin **and Cursor support**, installed on both laptops — the deployment itself is the MVP test (implementation spec: the plugin PRD below). Codex is evaluated but out of scope (Appendix B). The deck card comes after, gated on `human_review` pilot data. No standalone product (rationale in Positioning).
+**Pursue.** Next action: one public repo carrying the Claude Code plugin **and Cursor support**, installed on both laptops — the deployment itself is the MVP test (implementation spec: the plugin PRD below). Codex (CLI + desktop) is now in scope at parity — F6; the Codex IDE extension stays out (hooks undocumented, §10). The deck card comes after, gated on `human_review` pilot data. No standalone product (rationale in Positioning).
 
 ## Problem
 
@@ -81,7 +81,7 @@ Implementation half (scaffold: pb_prd_scaffold). Everything above is the framing
 
 ## 1. Product overview
 
-Scope: package the proven v0 loop (runner agent + named lens files + run log) into one public repo that installs on any machine — a Claude Code plugin (`.claude-plugin/`) and a Cursor plugin (`.cursor-plugin/`, **desktop IDE**; the CLI surface is excluded, §10) sharing config, contracts, and the run log — so the loop cannot be silently skipped on either host's covered surface. Codex: out of scope, port sketch in Appendix B.
+Scope: package the proven v0 loop (runner agent + named lens files + run log) into one public repo that installs on any machine — a Claude Code plugin (`.claude-plugin/`), a Cursor plugin (`.cursor-plugin/`, **desktop IDE**; the CLI surface is excluded, §10), and Codex support (**CLI + desktop**, doctor-managed `~/.codex/` install; the IDE extension is excluded, §10) sharing config, contracts, and the run log — so the loop cannot be silently skipped on any host's covered surface. Codex requirements: F6.
 
 **Success criteria (evaluated at M3 — seven days after hook activation):** plugin installed and passing `/lens-doctor` on 2 laptops; Stop-hook enforcement active on both hosts (Cursor: desktop IDE); ≥ 90% of `hook_check` records with `enforce=true` and `wrote_watched=true` also have `blocked=false` (§7.6, measurement window per §9, min 10 such records, both hosts pooled — Cursor prune means `watched_writes∧lens_run_found` is the wrong join); ≥ 1 `lens_run` logged from Cursor (`host: "cursor"`); ≥ 5 deliverables carry `human_review` lines.
 
@@ -97,7 +97,7 @@ Primary persona: a product lead who produces documents, decks, and specs through
 
 "I am a product lead / I want my correction standards enforced by agents themselves / I use Lens because corrections that don't compound cost me the ~12-round baseline (Problem, above)." Voice rules: use *lens, runner, worker, finding, run* — never introduce a synonym; "buddy" is allowed as informal alias in prose, never in contracts.
 
-Deferred roles (team members, Codex host): see §10.
+Deferred roles (team members): see §10. (Codex is now a supported host — F6.)
 
 ## 3. User stories (testable)
 
@@ -146,7 +146,14 @@ Acceptance:
 - [ ] the Cursor `stop` hook returns `followup_message` when watched writes lack a session `lens_run` (bounded by `loop_limit`; F5.2) and appends `hook_check` with `host: "cursor"`
 - [ ] configured lens directories are readable from the Cursor sandbox (`sandbox.json` `additionalReadonlyPaths`, written/merged by `/lens-doctor`; F5.3)
 
-Deferred stories (deck card fetch, Codex host, correction-capture automation): see §10.
+**US-7 (plugin). Same loop in Codex.** As a lens owner, I want the identical loop and enforcement when I work in Codex's CLI or desktop app (the IDE extension is excluded — §10).
+Acceptance:
+- [ ] `/lens-doctor` installs the Codex reviewer + `Stop`/`PostToolUse`/`UserPromptSubmit` hooks into `~/.codex/` and validates them (F6.5)
+- [ ] the Codex subagent reviews per §7.3 and logs per §7.1 with `host: "codex"`
+- [ ] a Codex turn that wrote a watched file via `apply_patch` is blocked at Stop until a same-session `lens_run` is logged; the block clears once it is (F6.2/F6.3)
+- [ ] an explicit lens invocation arms the session (warn-first, then blocks) with no watched writes (F6.4)
+
+Deferred stories (deck card fetch, correction-capture automation): see §10.
 
 ## 4. Features & requirements
 
@@ -193,7 +200,20 @@ Deferred stories (deck card fetch, Codex host, correction-capture automation): s
 | F5.1 | Repo ships the Cursor lens subagent (`agents/cursor/lens.md`, `readonly: true`) via `.cursor-plugin/` — same semantics as F2.1 in Cursor's subagent format | US-6 acceptance; diff vs the Claude runner shows only host-format changes |
 | F5.2 | Cursor `stop` hook mirrors F3 semantics via `followup_message` (bounded continuation, `loop_limit` default 5 — accepted per the feasibility evaluation); `afterFileEdit` records writes for detection; appends `hook_check` with `host` | US-6 acceptance |
 | F5.3 | Cursor install is the `.cursor-plugin/` marketplace import (Team Marketplace / local); `/lens-doctor` merges lens directories into `~/.cursor/sandbox.json` `additionalReadonlyPaths`; both hosts resolve the same `~/.lens/config.json` (§7.4) | `/lens-doctor` green covers both hosts |
-| F5.4 | Hook check logic is one shared Python implementation (`lens_lib.check`) with two host entry points | grep-verifiable: no duplicated check logic between hosts |
+| F5.4 | Hook check logic is one shared Python implementation (`lens_lib.check`) with per-host entry points (Claude, Cursor, Codex) | grep-verifiable: no duplicated check logic between hosts |
+
+### F6 — Codex support (CLI + desktop)
+
+Codex reaches parity with Claude/Cursor through the same shared `run_check` (F5.4's third entry point). Because Codex edits files via `apply_patch`/`shell` (not a `Write`/`Edit` tool with a clean `file_path`), write detection **mirrors Cursor's side-channel**, not Claude's transcript parse. Codex documents `Stop`, `PostToolUse`, and `UserPromptSubmit` hooks, so it gets full Claude-parity including arming.
+
+| Req | Requirement | Acceptance |
+| --- | --- | --- |
+| F6.1 | Repo ships the Codex reviewer subagent template `agents/codex/lens.toml` (`sandbox_mode = "read-only"`, `developer_instructions` = F2.1 semantics resolving named lenses via `~/.lens/config.json`); read-only, so it emits `LENS_LOG_APPEND` for the worker to append (like the Cursor runner), `host: "codex"` | US-7 acceptance; diff vs the Cursor runner shows only host-format changes |
+| F6.2 | `PostToolUse` hook (`python/codex_post_tool_use.py`) records written paths to the shared side-channel; paths are extracted from `apply_patch` envelopes (`*** Update/Add/Delete File:`, `*** Move to:`) plus explicit `file_path` fields (`lens_lib.codex_writes`) | a `.md` edit via `apply_patch` is recorded; a read-only `shell` call records nothing |
+| F6.3 | `Stop` hook (`python/codex_stop.py`) calls shared `run_check(host="codex")` on the side-channel writes and blocks via `{"decision": "block", "reason": …}` when watched writes lack a same-session `lens_run`; passes otherwise; every firing appends `hook_check` with `host: "codex"` | US-7 acceptance; parity with F3.1 |
+| F6.4 | `UserPromptSubmit` hook (`python/codex_user_prompt.py`) arms the session on explicit lens invocation, same warn-first + self-clearing semantics as F3.5 (shared `arm_session`/breaker/TTL) | an armed session with no watched writes warns then blocks; a false/abandoned arm self-clears |
+| F6.5 | `/lens-doctor` manages a Codex install: renders `agents/codex/lens.toml` + `hooks/codex-hooks.json` into `~/.codex/` with **absolute** script paths (no reliance on a plugin env var), non-destructively merging `~/.codex/hooks.json`; validates the log dir against `writable_roots` (guides, never mutates `config.toml`). Runs only when `~/.codex/` exists, so a Claude-only machine is untouched | `/lens-doctor` green includes `codex_hooks`, `codex_install`, `codex_writable_roots` |
+| F6.6 | Hook/command scripts stay Python 3 stdlib-only (F1.3); no third-party imports (`tomllib` is stdlib, guarded) | grep-verifiable |
 
 ## 5. Pricing model
 
@@ -222,7 +242,7 @@ All schemas are JSON Schema Draft 2020-12. Contracts directory in the plugin rep
     "deliverable": { "type": "string", "minLength": 1 },
     "rounds": { "type": "integer", "minimum": 1 },
     "verdict": { "enum": ["pass", "escalated"] },
-    "host": { "enum": ["claude-code", "cursor"], "description": "absent in records written before Cursor support = claude-code" },
+    "host": { "enum": ["claude-code", "cursor", "codex"], "description": "absent in records written before Cursor support = claude-code" },
     "findings": {
       "type": "array",
       "items": {
@@ -355,7 +375,7 @@ Shares the run-log file; analyses select by `event`, so the newest-record-per-de
 
 ## 8. Technical constraints & preferences
 
-- Hosts in the plugin release: Claude Code (`.claude-plugin/` marketplace) and Cursor (`.cursor-plugin/` marketplace — Team Marketplace / local import; desktop IDE). Codex: Appendix B only.
+- Hosts in the plugin release: Claude Code (`.claude-plugin/` marketplace), Cursor (`.cursor-plugin/` marketplace — Team Marketplace / local import; desktop IDE), and Codex (CLI + desktop, doctor-managed `~/.codex/` install — F6). Codex IDE extension: out of scope (§10).
 - Python 3 stdlib only for hooks/commands (F1.3); no network calls anywhere in the plugin release — lens bodies are local files; sync is the owner's choice (git, sync disk, etc.).
 - No Lexicon/`vault`/`area` concepts in config or contracts — only named lenses, absolute file paths, and `log_path`.
 - macOS is the only supported OS in the plugin release.
@@ -374,8 +394,8 @@ Shares the run-log file; analyses select by `event`, so the newest-record-per-de
 ## 10. Out of scope (canonical)
 
 - Agent Deck lens card + MCP fetch (gated on `human_review` pilot data — see Decision)
-- Codex host (feasible per the evaluation above; port sketch in Appendix B)
 - Cursor CLI surface (hook delivery documented-limited and reported unreliable — feasibility section; desktop IDE only in this release)
+- Codex IDE extension surface (hooks undocumented — F6 covers CLI + desktop only)
 - Team/shared lenses; any multi-user concern
 - Correction-capture automation (proposing lens criteria from live corrections)
 - agent-dealer gate integration; standalone product
@@ -420,6 +440,6 @@ Owner for all milestones: lens owner (side project).
 | AI-Codegen PRD Scaffold (`pb_prd_scaffold`, product deck) | PRD section structure, contracts/NFR/open-decision conventions |
 | Cursor & Codex feasibility section (above, with doc URLs) | F5 mechanisms; Appendix B port sketch |
 
-## Appendix B — Codex port sketch (out of scope for this release)
+## Appendix B — Codex port (implemented — see F6)
 
-Feasibility: strong on CLI/desktop, evaluated 2026-08-01 (section above, with citations). A future port needs, mirroring F2/F3/F4: a reviewer subagent at `~/.codex/agents/lens.toml` (`sandbox_mode = "read-only"`, `developer_instructions` resolving named lenses via the same `~/.lens/config.json`); a `Stop` hook returning `{"decision": "block"}` running the same shared check logic (F5.4's third entry point); `writable_roots` (or hook-side append) for `log_path` with `host: "codex"` added to the §7.1/§7.6 enums. Blocked surface: the IDE extension (hooks undocumented). Not built now because the pilot measures two hosts first; the shared-logic design (F5.4) keeps the port to roughly one TOML file plus one hooks entry.
+Superseded: Codex is now a supported host at parity with Claude/Cursor. The port sketch this appendix once held is implemented as **F6** (CLI + desktop). One correction the build surfaced over the original sketch: Codex edits via `apply_patch`/`shell`, so write detection had to **mirror Cursor's `PostToolUse` side-channel**, not parse the transcript like Claude — the reviewer subagent, `Stop` block, arming, and shared `run_check` otherwise landed as sketched. The IDE extension remains excluded (hooks undocumented — §10).

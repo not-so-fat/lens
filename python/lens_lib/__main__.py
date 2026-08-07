@@ -145,7 +145,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     p_app = sub.add_parser("append-run", help="append lens_run JSON")
     p_app.add_argument("--json", help="lens_run JSON object")
-    p_app.add_argument("--host", choices=["claude-code", "cursor"])
+    p_app.add_argument("--host", choices=["claude-code", "cursor", "codex"])
     p_app.add_argument(
         "--session",
         help="conversation/session id to stamp on the lens_run (Cursor gate backup)",

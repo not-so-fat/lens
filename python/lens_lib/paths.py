@@ -8,27 +8,21 @@ import re
 from pathlib import Path, PurePosixPath
 from typing import Iterable, List, Tuple
 
-from .util import claude_home, system_temp_dir
+from .util import claude_home, codex_home, system_temp_dir
 
 
 def is_excluded(path: Path) -> bool:
-    """Paths under ~/.claude/ and the system temp directory never match."""
+    """Paths under ~/.claude/, ~/.codex/, and the system temp dir never match."""
     try:
         resolved = path.resolve()
     except OSError:
         resolved = path
-    claude = claude_home()
-    tmp = system_temp_dir()
-    try:
-        resolved.relative_to(claude)
-        return True
-    except ValueError:
-        pass
-    try:
-        resolved.relative_to(tmp)
-        return True
-    except ValueError:
-        pass
+    for base in (claude_home(), codex_home(), system_temp_dir()):
+        try:
+            resolved.relative_to(base)
+            return True
+        except ValueError:
+            continue
     return False
 
 
