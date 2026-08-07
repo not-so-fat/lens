@@ -1,0 +1,38 @@
+{
+  "description": "Lens Stop-hook enforcement for Codex (CLI + desktop)",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CODEX_PLUGIN_ROOT}/python/codex_user_prompt.py\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CODEX_PLUGIN_ROOT}/python/codex_post_tool_use.py\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CODEX_PLUGIN_ROOT}/python/codex_stop.py\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

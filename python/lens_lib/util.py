@@ -27,6 +27,10 @@ def cursor_home() -> Path:
     return expand_path("~/.cursor")
 
 
+def codex_home() -> Path:
+    return expand_path("~/.codex")
+
+
 def lens_config_path() -> Path:
     return expand_path("~/.lens/config.json")
 

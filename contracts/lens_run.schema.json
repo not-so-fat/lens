@@ -17,7 +17,7 @@
       "description": "both terminal verdicts satisfy the Stop/stop enforcement gate"
     },
     "host": {
-      "enum": ["claude-code", "cursor"],
+      "enum": ["claude-code", "cursor", "codex"],
       "description": "absent in records written before Cursor support = claude-code"
     },
     "session": {

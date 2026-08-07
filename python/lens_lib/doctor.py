@@ -23,7 +23,12 @@ from .log import ensure_log
 from .claude_perms import ClaudePermsError, ensure_allow, missing_allow
 from .claude_perms import settings_path as claude_settings_path
 from .sandbox import ensure_readonly_path, path_in_sandbox, sandbox_path
-from .util import claude_home, cursor_home, expand_path
+from .codex_config import (
+    codex_install_status,
+    ensure_codex_install,
+    writable_roots_status,
+)
+from .util import claude_home, codex_home, cursor_home, expand_path
 
 
 @dataclass
@@ -46,7 +51,11 @@ class DoctorReport:
 
 
 def _plugin_root() -> Optional[Path]:
-    env = os.environ.get("CLAUDE_PLUGIN_ROOT") or os.environ.get("CURSOR_PLUGIN_ROOT")
+    env = (
+        os.environ.get("CLAUDE_PLUGIN_ROOT")
+        or os.environ.get("CURSOR_PLUGIN_ROOT")
+        or os.environ.get("CODEX_PLUGIN_ROOT")
+    )
     if env:
         return expand_path(env)
     here = Path(__file__).resolve()
@@ -205,6 +214,26 @@ def _hooks_registered_cursor(plugin_root: Optional[Path]) -> tuple[bool, str]:
     return False, "Cursor stop hook not found (import lens plugin / Team Marketplace)"
 
 
+def _hooks_registered_codex(plugin_root: Optional[Path]) -> tuple[bool, str]:
+    """Validate the repo hooks/codex-hooks.json wires the codex scripts."""
+    if not plugin_root:
+        return True, "plugin root not resolved — repo hook template check skipped"
+    hooks = plugin_root / "hooks" / "codex-hooks.json"
+    if not hooks.is_file():
+        return False, f"missing {hooks}"
+    return _validate_hook_commands(
+        host="codex",
+        hooks_file=hooks,
+        plugin_root=plugin_root,
+        required_var="CODEX_PLUGIN_ROOT",
+        required_scripts=[
+            "python/codex_stop.py",
+            "python/codex_post_tool_use.py",
+            "python/codex_user_prompt.py",
+        ],
+    )
+
+
 def _lens_marketplace_source(registry: Optional[Path] = None) -> tuple[bool, str]:
     """Warn when a directory-source marketplace that provides lens points at a
     path that no longer exists.
@@ -335,6 +364,21 @@ def run_doctor(
     report.add("claude_hooks", ok_c, detail_c)
     ok_u, detail_u = _hooks_registered_cursor(plugin_root)
     report.add("cursor_hooks", ok_u, detail_u)
+
+    # Codex (F6): validate the repo template, then manage the ~/.codex/ install —
+    # but only when Codex is actually present, so a Claude-only machine is untouched.
+    ok_cx, detail_cx = _hooks_registered_codex(plugin_root)
+    report.add("codex_hooks", ok_cx, detail_cx)
+    if codex_home().exists():
+        if fix_sandbox:
+            ok_i, detail_i = ensure_codex_install(plugin_root)
+        else:
+            ok_i, detail_i = codex_install_status(plugin_root)
+        report.add("codex_install", ok_i, detail_i)
+        ok_w, detail_w = writable_roots_status(cfg)
+        report.add("codex_writable_roots", ok_w, detail_w)
+    else:
+        report.add("codex_install", True, "~/.codex not present — Codex not installed (skip)")
 
     ok_m, detail_m = _lens_marketplace_source()
     report.add("marketplace_source", ok_m, detail_m)
