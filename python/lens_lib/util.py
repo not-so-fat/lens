@@ -50,14 +50,19 @@ def _safe_session(session: str) -> str:
     return session.replace("/", "_").replace("\\", "_")
 
 
+def sessions_root() -> Path:
+    """Root dir holding per-session marker files (writes.txt / armed.txt)."""
+    return expand_path("~/.lens/sessions")
+
+
 def session_writes_path(session: str) -> Path:
     """Cursor afterFileEdit side-channel keyed by conversation/session id."""
-    return expand_path("~/.lens/sessions") / _safe_session(session) / "writes.txt"
+    return sessions_root() / _safe_session(session) / "writes.txt"
 
 
 def session_armed_path(session: str) -> Path:
     """Explicit-invocation arm marker keyed by session id (I-9)."""
-    return expand_path("~/.lens/sessions") / _safe_session(session) / "armed.txt"
+    return sessions_root() / _safe_session(session) / "armed.txt"
 
 
 def conversation_workspace_writes_path(workspace_root: str, conversation_id: str) -> Path:
@@ -65,7 +70,7 @@ def conversation_workspace_writes_path(workspace_root: str, conversation_id: str
     key = _workspace_key(workspace_root)
     safe = _safe_session(conversation_id)
     return (
-        expand_path("~/.lens/sessions")
+        sessions_root()
         / "by-workspace"
         / key
         / "conversations"
@@ -77,7 +82,7 @@ def conversation_workspace_writes_path(workspace_root: str, conversation_id: str
 def workspace_writes_path(workspace_root: str) -> Path:
     """Fallback when conversation/session id is missing (I-3)."""
     key = _workspace_key(workspace_root)
-    return expand_path("~/.lens/sessions") / "by-workspace" / key / "writes.txt"
+    return sessions_root() / "by-workspace" / key / "writes.txt"
 
 
 def prefer_conversation_ids(

@@ -23,6 +23,7 @@ class Config:
     lenses_dir: Optional[Path] = None
     enforce: bool = True
     watch_globs: List[str] = field(default_factory=lambda: list(DEFAULT_WATCH_GLOBS))
+    ignore_globs: List[str] = field(default_factory=list)
     source: str = "config"
 
 
@@ -115,6 +116,7 @@ def _from_data(data: dict, source: str) -> Config:
             if "watch_globs" in data
             else list(DEFAULT_WATCH_GLOBS)
         ),
+        ignore_globs=list(data.get("ignore_globs") or []),
         source=source,
     )
     # Ensure default resolves

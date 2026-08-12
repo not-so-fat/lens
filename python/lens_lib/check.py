@@ -16,13 +16,14 @@ from .log import (
     has_lens_run_for_sessions,
     latest_lens_run_ts,
 )
-from .paths import filter_watched
+from .paths import BUILTIN_IGNORE_GLOBS, filter_watched, load_lensignore
 from .transcript import gather_writes, prune_sidechannel_file, session_id_from_transcript
 from .util import (
     INVOCATION_TEMPLATE,
     conversation_workspace_writes_path,
     session_armed_path,
     session_writes_path,
+    sessions_root,
     utc_now_iso,
     workspace_writes_path,
 )
@@ -227,6 +228,34 @@ def record_arm_block(session: str) -> int:
     return n
 
 
+def armed_session_ids() -> List[str]:
+    """Session ids with a *live* arm (asked for a lens, still waiting).
+
+    A completed review credits these so the run satisfies the session that
+    requested it — even when the review ran in a different (sub-agent) session.
+    Reuses the arm mechanism's path (`session_armed_path` via `read_arm_ts`) and
+    liveness rule: a stale arm (older than `ARM_TTL_SECONDS`, which the block path
+    would expire) is not credited.
+    """
+    out: List[str] = []
+    try:
+        entries = sorted(sessions_root().iterdir())
+    except OSError:
+        return out
+    for d in entries:
+        # d.name is the _safe_session dir name; for UUID session ids (no `/`/`\`)
+        # it equals the raw id the gate matches on.
+        sid = d.name
+        armed_ts = read_arm_ts(sid)
+        if not armed_ts:
+            continue
+        age = _arm_age_seconds(armed_ts)
+        if age is not None and age > ARM_TTL_SECONDS:
+            continue
+        out.append(sid)
+    return out
+
+
 def run_check(
     *,
     host: str,
@@ -284,6 +313,13 @@ def run_check(
     if not transcript_path and real:
         after_ts = latest_lens_run_ts(cfg.log_path, real)
 
+    # Routine files a repo/config marked non-deliverable never trip the write gate.
+    ignore_globs = [
+        *BUILTIN_IGNORE_GLOBS,
+        *cfg.ignore_globs,
+        *load_lensignore(cwd),
+    ]
+
     # Full session activity (for M3 metric) — ignore after_ts.
     written_all, _ = gather_writes(
         transcript_path,
@@ -292,7 +328,7 @@ def run_check(
         after_ts=None,
     )
     watched_all, excluded_count = filter_watched(
-        written_all, cfg.watch_globs, cwd
+        written_all, cfg.watch_globs, cwd, ignore_globs=ignore_globs
     )
     wrote_watched = len(watched_all) > 0
 
@@ -302,7 +338,9 @@ def run_check(
         watch_globs=cfg.watch_globs,
         after_ts=after_ts,
     )
-    watched, _ = filter_watched(written, cfg.watch_globs, cwd)
+    watched, _ = filter_watched(
+        written, cfg.watch_globs, cwd, ignore_globs=ignore_globs
+    )
     watched_writes = len(watched) > 0
     lens_run_found = False
     gate = "none"
