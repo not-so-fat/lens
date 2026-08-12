@@ -25,7 +25,14 @@ from lens_lib.config import (  # noqa: E402
 )
 from lens_lib.lens_parse import parse_lens_file  # noqa: E402
 from lens_lib.log import append_record, has_lens_run_since, parse_iso_ts  # noqa: E402
-from lens_lib.paths import matches_glob, path_matches_watch  # noqa: E402
+from lens_lib.paths import (  # noqa: E402
+    filter_watched,
+    load_lensignore,
+    matches_glob,
+    path_matches_watch,
+)
+from lens_lib.check import arm_session, armed_session_ids  # noqa: E402
+from lens_lib.log import has_lens_run_for_sessions  # noqa: E402
 from lens_lib.transcript import first_event_ts, written_paths_from_transcript  # noqa: E402
 
 SAMPLE = """---
@@ -962,6 +969,127 @@ class ClaudePermissionsTests(unittest.TestCase):
                 report = run_doctor(fix_sandbox=False)
                 cp = [c for c in report.checks if c.name == "claude_permissions"]
                 self.assertTrue(cp and not cp[0].ok)
+            finally:
+                if old_home is None:
+                    os.environ.pop("HOME", None)
+                else:
+                    os.environ["HOME"] = old_home
+
+
+class IgnoreGlobsTests(unittest.TestCase):
+    def test_filter_watched_excludes_ignore_matches(self):
+        cwd = str(ROOT)
+        keep = str(ROOT / "docs" / "SPEC.md")
+        drop = str(ROOT / "CHANGELOG.md")
+        watched, excluded = filter_watched(
+            [keep, drop], ["**/*.md"], cwd, ignore_globs=["CHANGELOG.md"]
+        )
+        self.assertEqual(watched, [keep])
+        self.assertEqual(excluded, 1)
+
+    def test_builtin_ignores_node_modules(self):
+        cwd = str(ROOT)
+        nm = str(ROOT / "node_modules" / "pkg" / "readme.md")
+        from lens_lib.paths import BUILTIN_IGNORE_GLOBS
+
+        watched, _ = filter_watched(
+            [nm], ["**/*.md"], cwd, ignore_globs=list(BUILTIN_IGNORE_GLOBS)
+        )
+        self.assertEqual(watched, [])
+
+    def test_load_lensignore_walks_up(self):
+        with tempfile.TemporaryDirectory() as td:
+            (Path(td) / ".lensignore").write_text(
+                "# routine\nCHANGELOG.md\ndocs/**\n", encoding="utf-8"
+            )
+            sub = Path(td) / "a" / "b"
+            sub.mkdir(parents=True)
+            self.assertEqual(load_lensignore(str(sub)), ["CHANGELOG.md", "docs/**"])
+
+    def test_run_check_ignores_lensignored_write(self):
+        with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:
+            lens = Path(td) / "lens.md"
+            log = Path(td) / "runs.jsonl"
+            lens.write_text(SAMPLE)
+            home = Path(td) / "home"
+            home.mkdir()
+            (Path(td) / ".lensignore").write_text("CHANGELOG.md\n", encoding="utf-8")
+            changelog = Path(td) / "CHANGELOG.md"
+            changelog.write_text("x", encoding="utf-8")
+            old_home = os.environ.get("HOME")
+            os.environ["HOME"] = str(home)
+            os.environ.pop("LENS_LOG_PATH", None)
+            try:
+                write_config(
+                    str(log),
+                    lenses={"review": str(lens)},
+                    default_lens="review",
+                    enforce=True,
+                )
+                transcript = Path(td) / "sess.jsonl"
+                transcript.write_text(
+                    json.dumps({"type": "user", "timestamp": "2026-07-31T10:00:00.000Z", "cwd": str(td)})
+                    + "\n"
+                    + json.dumps({
+                        "type": "assistant",
+                        "timestamp": "2026-07-31T10:00:01.000Z",
+                        "message": {"content": [{
+                            "type": "tool_use", "name": "Write",
+                            "input": {"file_path": str(changelog), "content": "x"},
+                        }]},
+                    })
+                    + "\n"
+                )
+                result = run_check(
+                    host="claude-code", transcript_path=str(transcript),
+                    session_id="sess", cwd=td,
+                )
+                # CHANGELOG.md is ignored → no watched write → no block.
+                self.assertFalse(result.watched_writes)
+                self.assertFalse(result.blocked)
+            finally:
+                if old_home is None:
+                    os.environ.pop("HOME", None)
+                else:
+                    os.environ["HOME"] = old_home
+
+
+class AttributionTests(unittest.TestCase):
+    def test_append_run_credits_armed_session(self):
+        """A review logged under a sub-agent session credits the armed parent."""
+        with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:
+            log = Path(td) / "runs.jsonl"
+            home = Path(td) / "home"
+            home.mkdir()
+            old_home = os.environ.get("HOME")
+            os.environ["HOME"] = str(home)
+            os.environ.pop("LENS_LOG_PATH", None)
+            try:
+                lens = Path(td) / "lens.md"
+                lens.write_text(SAMPLE)
+                write_config(
+                    str(log), lenses={"review": str(lens)},
+                    default_lens="review", enforce=True,
+                )
+                arm_session("parent-sess")
+                self.assertEqual(armed_session_ids(), ["parent-sess"])
+
+                record = json.dumps({
+                    "ts": "2026-07-31T10:00:02.000Z", "lens": "review",
+                    "deliverable": "doc", "rounds": 1, "verdict": "pass",
+                    "findings": [], "escalations": [],
+                })
+                out = subprocess.run(
+                    [sys.executable, "-m", "lens_lib", "append-run",
+                     "--json", record, "--session", "subagent-sess"],
+                    cwd=str(ROOT), env={**os.environ, "PYTHONPATH": str(ROOT / "python")},
+                    capture_output=True, text=True,
+                )
+                self.assertEqual(out.returncode, 0, out.stderr)
+                # The run is tagged with the sub-agent session AND credits the
+                # armed parent, so the parent's gate is satisfied.
+                self.assertTrue(has_lens_run_for_sessions(log, ["parent-sess"]))
+                self.assertTrue(has_lens_run_for_sessions(log, ["subagent-sess"]))
             finally:
                 if old_home is None:
                     os.environ.pop("HOME", None)

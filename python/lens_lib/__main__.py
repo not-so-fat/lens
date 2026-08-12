@@ -58,6 +58,18 @@ def cmd_append_run(args: argparse.Namespace) -> int:
         record["host"] = args.host
     if getattr(args, "session", None):
         record["session"] = args.session
+    # Credit any session that armed the lens and is still waiting for a run, so a
+    # review satisfies the session that requested it even when the review ran in a
+    # different (sub-agent) session. See check.armed_session_ids.
+    from .check import armed_session_ids
+
+    armed = armed_session_ids()
+    if armed:
+        ids = list(record.get("session_ids") or [])
+        for sid in armed:
+            if sid and sid not in ids:
+                ids.append(sid)
+        record["session_ids"] = ids
     errors = validate_lens_run_shape(record)
     if errors:
         print("append-run: " + "; ".join(errors), file=sys.stderr)

@@ -41,6 +41,17 @@ Optional `lenses_dir`: drop `<name>.md` into a folder and invoke with that name 
 
 Env: `LENS_LOG_PATH`, `LENS_DEFAULT` (default lens name).
 
+### Scoping the write gate (`ignore_globs` / `.lensignore`)
+
+The write gate fires on every `watch_globs` match. Routine files (changelogs, notes, generated docs, tests) aren't review deliverables, so exclude them:
+
+- **Global:** add `"ignore_globs": ["**/*.test.*", "notes/**"]` to `~/.lens/config.json`.
+- **Per repo (committed, applies on every laptop):** drop a **`.lensignore`** in the repo root — gitignore-style, one glob per line, `#` comments. A slash-free line matches by basename anywhere (`CHANGELOG.md`), `docs/**` matches a subtree.
+
+`node_modules`, `.git`, `dist`, `build`, `__pycache__`, and `.lens` are always ignored. Ignored files never trigger the gate; a real deliverable still does.
+
+A lens review that runs in a sub-agent now also **credits the session that armed the lens** — so `use <lens>` → sub-agent review clears the arm on Claude *and* Cursor, not just when the run is tagged with the exact originating session.
+
 ## Install
 
 Lens is a **public GitHub marketplace**. Both hosts copy the plugin into their own

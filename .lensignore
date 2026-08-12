@@ -1,0 +1,6 @@
+# Routine files in this repo that aren't lens-review deliverables.
+# gitignore-style: one glob per line, `#` comments. Slash-free = basename anywhere.
+# node_modules/.git/dist/build/__pycache__/.lens are ignored by default.
+CHANGELOG.md
+README.md
+docs/ISSUES.md
