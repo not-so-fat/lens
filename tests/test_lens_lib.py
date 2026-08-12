@@ -1074,6 +1074,48 @@ class AttributionTests(unittest.TestCase):
                 else:
                     os.environ["HOME"] = old_home
 
+    def test_append_run_credits_all_live_arms_lens_agnostic(self):
+        """Pinned behavior: a review credits every live-armed session, regardless
+        of which lens each asked for. Harmless on a single-user sequential machine;
+        with concurrent chats armed for different lenses it is a documented
+        loosening (see cmd_append_run / armed_session_ids)."""
+        with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:
+            log = Path(td) / "runs.jsonl"
+            home = Path(td) / "home"
+            home.mkdir()
+            old_home = os.environ.get("HOME")
+            os.environ["HOME"] = str(home)
+            os.environ.pop("LENS_LOG_PATH", None)
+            try:
+                lens = Path(td) / "lens.md"
+                lens.write_text(SAMPLE)
+                write_config(
+                    str(log), lenses={"review": str(lens)},
+                    default_lens="review", enforce=True,
+                )
+                arm_session("sess-deck")
+                arm_session("sess-yusuke")
+                record = json.dumps({
+                    "ts": "2026-07-31T10:00:02.000Z", "lens": "yusuke",
+                    "deliverable": "doc", "rounds": 1, "verdict": "pass",
+                    "findings": [], "escalations": [],
+                })
+                out = subprocess.run(
+                    [sys.executable, "-m", "lens_lib", "append-run",
+                     "--json", record, "--session", "subagent"],
+                    cwd=str(ROOT), env={**os.environ, "PYTHONPATH": str(ROOT / "python")},
+                    capture_output=True, text=True,
+                )
+                self.assertEqual(out.returncode, 0, out.stderr)
+                # Both arms are credited even though the run's lens is "yusuke".
+                self.assertTrue(has_lens_run_for_sessions(log, ["sess-deck"]))
+                self.assertTrue(has_lens_run_for_sessions(log, ["sess-yusuke"]))
+            finally:
+                if old_home is None:
+                    os.environ.pop("HOME", None)
+                else:
+                    os.environ["HOME"] = old_home
+
     def test_append_run_credits_armed_session(self):
         """A review logged under a sub-agent session credits the armed parent."""
         with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:

@@ -243,6 +243,8 @@ def armed_session_ids() -> List[str]:
     except OSError:
         return out
     for d in entries:
+        # d.name is the _safe_session dir name; for UUID session ids (no `/`/`\`)
+        # it equals the raw id the gate matches on.
         sid = d.name
         armed_ts = read_arm_ts(sid)
         if not armed_ts:

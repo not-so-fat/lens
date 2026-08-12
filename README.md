@@ -46,7 +46,7 @@ Env: `LENS_LOG_PATH`, `LENS_DEFAULT` (default lens name).
 The write gate fires on every `watch_globs` match. Routine files (changelogs, notes, generated docs, tests) aren't review deliverables, so exclude them:
 
 - **Global:** add `"ignore_globs": ["**/*.test.*", "notes/**"]` to `~/.lens/config.json`.
-- **Per repo (committed, applies on every laptop):** drop a **`.lensignore`** in the repo root — gitignore-style, one glob per line, `#` comments. A slash-free line matches by basename anywhere (`CHANGELOG.md`), `docs/**` matches a subtree.
+- **Per repo (committed, applies on every laptop):** drop a **`.lensignore`** in the repo root — gitignore-style, one glob per line, `#` comments. A slash-free line matches by basename anywhere (`CHANGELOG.md`); a line with a slash (`docs/**`) matches relative to the hook's `cwd` (normally the repo root). Only the **nearest** `.lensignore` walking up from `cwd` is read — patterns are not merged up the tree.
 
 `node_modules`, `.git`, `dist`, `build`, `__pycache__`, and `.lens` are always ignored. Ignored files never trigger the gate; a real deliverable still does.
 

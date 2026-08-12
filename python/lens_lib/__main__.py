@@ -58,9 +58,14 @@ def cmd_append_run(args: argparse.Namespace) -> int:
         record["host"] = args.host
     if getattr(args, "session", None):
         record["session"] = args.session
-    # Credit any session that armed the lens and is still waiting for a run, so a
-    # review satisfies the session that requested it even when the review ran in a
-    # different (sub-agent) session. See check.armed_session_ids.
+    # Credit any session with a live arm, so a review satisfies the session that
+    # requested it even when it ran in a different (sub-agent) session.
+    # Crediting is lens-AGNOSTIC: the run's `lens` is not matched against what each
+    # armed session asked for. On a single-user sequential machine that is
+    # harmless; with concurrent chats armed for *different* lenses, a review for
+    # one can clear another's arm (a bounded false-clear — arms still self-expire
+    # via TTL/circuit-breaker). Matching by lens would require arming to record the
+    # requested lens name; deferred. See check.armed_session_ids.
     from .check import armed_session_ids
 
     armed = armed_session_ids()
