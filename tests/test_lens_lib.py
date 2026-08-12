@@ -1055,6 +1055,25 @@ class IgnoreGlobsTests(unittest.TestCase):
 
 
 class AttributionTests(unittest.TestCase):
+    def test_armed_session_ids_excludes_stale_arm(self):
+        """A stale arm (older than TTL) is not credited — matches the block path."""
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td) / "home"
+            home.mkdir()
+            old_home = os.environ.get("HOME")
+            os.environ["HOME"] = str(home)
+            try:
+                arm_session("fresh-sess")
+                arm_session("stale-sess", ts="2020-01-01T00:00:00Z")
+                ids = armed_session_ids()
+                self.assertIn("fresh-sess", ids)
+                self.assertNotIn("stale-sess", ids)
+            finally:
+                if old_home is None:
+                    os.environ.pop("HOME", None)
+                else:
+                    os.environ["HOME"] = old_home
+
     def test_append_run_credits_armed_session(self):
         """A review logged under a sub-agent session credits the armed parent."""
         with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:

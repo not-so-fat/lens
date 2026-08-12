@@ -50,8 +50,6 @@ The write gate fires on every `watch_globs` match. Routine files (changelogs, no
 
 `node_modules`, `.git`, `dist`, `build`, `__pycache__`, and `.lens` are always ignored. Ignored files never trigger the gate; a real deliverable still does.
 
-A lens review that runs in a sub-agent now also **credits the session that armed the lens** — so `use <lens>` → sub-agent review clears the arm on Claude *and* Cursor, not just when the run is tagged with the exact originating session.
-
 ## Install
 
 Lens is a **public GitHub marketplace**. Both hosts copy the plugin into their own
@@ -155,7 +153,7 @@ On a terminal round it appends one `lens_run` (field `lens` = name) to `log_path
 
 ### Chat deliverables & explicit invocation
 
-Enforcement normally fires on writes to `watch_globs` files. A deliverable produced **in the chat** (analysis, comparison, summary) writes no file, so the write gate can't see it. But on **Claude Code and Codex**, when you **explicitly ask for the lens** — e.g. `use yusuke lens`, `lens=deck`, `run the lens`, `with yusuke lens` — a `UserPromptSubmit` hook **arms** the session: the Stop hook then requires a `lens_run` for it, **regardless of writes**, and disarms once the run lands. Because a prompt-text arm is a heuristic, enforcement is warn-first — the first unsatisfied stop only warns, a later one blocks — and self-clearing (a 3-block circuit breaker + a 2 h TTL) so a false or abandoned arm can't wedge the session. So an explicit request is enforced for chat work too. (Negated/hedged mentions — "don't use the lens" — do not arm.)
+Enforcement normally fires on writes to `watch_globs` files. A deliverable produced **in the chat** (analysis, comparison, summary) writes no file, so the write gate can't see it. But on **Claude Code and Codex**, when you **explicitly ask for the lens** — e.g. `use yusuke lens`, `lens=deck`, `run the lens`, `with yusuke lens` — a `UserPromptSubmit` hook **arms** the session: the Stop hook then requires a `lens_run` for it, **regardless of writes**, and disarms once the run lands. Because a prompt-text arm is a heuristic, enforcement is warn-first — the first unsatisfied stop only warns, a later one blocks — and self-clearing (a 3-block circuit breaker + a 2 h TTL) so a false or abandoned arm can't wedge the session. So an explicit request is enforced for chat work too. (Negated/hedged mentions — "don't use the lens" — do not arm.) A review that runs in a **sub-agent** still satisfies the parent session's gate: `append-run` credits any live armed session.
 
 Not yet on **Cursor** (no prompt-submit arming wired — tracked in [`docs/ISSUES.md`](docs/ISSUES.md) I-9); and a chat deliverable you did *not* explicitly flag is still not auto-enforced on any host. Set `"enforce": false` to pause all blocking.
 

@@ -21,33 +21,12 @@ from .transcript import gather_writes, prune_sidechannel_file, session_id_from_t
 from .util import (
     INVOCATION_TEMPLATE,
     conversation_workspace_writes_path,
-    expand_path,
     session_armed_path,
     session_writes_path,
+    sessions_root,
     utc_now_iso,
     workspace_writes_path,
 )
-
-
-def armed_session_ids() -> List[str]:
-    """Session ids currently armed (asked for a lens, waiting for a lens_run).
-
-    A completed review credits these so the run satisfies the session that
-    requested it — even when the review ran in a different (sub-agent) session.
-    """
-    root = expand_path("~/.lens/sessions")
-    out: List[str] = []
-    try:
-        entries = sorted(root.iterdir())
-    except OSError:
-        return out
-    for d in entries:
-        try:
-            if (d / "armed.txt").is_file():
-                out.append(d.name)
-        except OSError:
-            continue
-    return out
 
 
 @dataclass
@@ -247,6 +226,32 @@ def record_arm_block(session: str) -> int:
     except OSError:
         pass
     return n
+
+
+def armed_session_ids() -> List[str]:
+    """Session ids with a *live* arm (asked for a lens, still waiting).
+
+    A completed review credits these so the run satisfies the session that
+    requested it — even when the review ran in a different (sub-agent) session.
+    Reuses the arm mechanism's path (`session_armed_path` via `read_arm_ts`) and
+    liveness rule: a stale arm (older than `ARM_TTL_SECONDS`, which the block path
+    would expire) is not credited.
+    """
+    out: List[str] = []
+    try:
+        entries = sorted(sessions_root().iterdir())
+    except OSError:
+        return out
+    for d in entries:
+        sid = d.name
+        armed_ts = read_arm_ts(sid)
+        if not armed_ts:
+            continue
+        age = _arm_age_seconds(armed_ts)
+        if age is not None and age > ARM_TTL_SECONDS:
+            continue
+        out.append(sid)
+    return out
 
 
 def run_check(
