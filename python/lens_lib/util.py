@@ -70,7 +70,7 @@ def conversation_workspace_writes_path(workspace_root: str, conversation_id: str
     key = _workspace_key(workspace_root)
     safe = _safe_session(conversation_id)
     return (
-        expand_path("~/.lens/sessions")
+        sessions_root()
         / "by-workspace"
         / key
         / "conversations"
@@ -82,7 +82,7 @@ def conversation_workspace_writes_path(workspace_root: str, conversation_id: str
 def workspace_writes_path(workspace_root: str) -> Path:
     """Fallback when conversation/session id is missing (I-3)."""
     key = _workspace_key(workspace_root)
-    return expand_path("~/.lens/sessions") / "by-workspace" / key / "writes.txt"
+    return sessions_root() / "by-workspace" / key / "writes.txt"
 
 
 def prefer_conversation_ids(
