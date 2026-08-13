@@ -118,6 +118,21 @@ class PathsTests(unittest.TestCase):
         self.assertTrue(path_matches_watch(md, ["**/*.md"], cwd))
         self.assertFalse(path_matches_watch(py, ["**/*.md"], cwd))
 
+    def test_harness_scratch_is_excluded(self):
+        from lens_lib.paths import filter_watched, is_excluded
+
+        # Claude Code stashes session scratch under /private/tmp/claude-<uid>/ —
+        # markdown drafts there (PR bodies, etc.) are never deliverables.
+        scratch = "/private/tmp/claude-501/x/scratchpad/pr-body-1.md"
+        tmp_md = "/tmp/pr.md"
+        self.assertTrue(is_excluded(Path(scratch)))
+        self.assertTrue(is_excluded(Path(tmp_md)))
+        # A real repo deliverable is still watched.
+        watched, _ = filter_watched(
+            [scratch, tmp_md, "/Users/x/repo/docs/SPEC.md"], ["**/*.md"], "/Users/x/repo"
+        )
+        self.assertEqual(watched, ["/Users/x/repo/docs/SPEC.md"])
+
 
 class TranscriptTests(unittest.TestCase):
     def test_write_extraction(self):

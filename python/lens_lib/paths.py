@@ -8,16 +8,20 @@ import re
 from pathlib import Path, PurePosixPath
 from typing import Iterable, List, Tuple
 
-from .util import claude_home, codex_home, system_temp_dir
+from .util import claude_home, classic_temp_dirs, codex_home, system_temp_dir
 
 
 def is_excluded(path: Path) -> bool:
-    """Paths under ~/.claude/, ~/.codex/, and the system temp dir never match."""
+    """Paths under ~/.claude/, ~/.codex/, and any temp dir never match.
+
+    Temp covers `$TMPDIR` plus the classic `/tmp` / `/private/tmp` where agent
+    harnesses stash session scratch (e.g. Claude Code's `.../scratchpad/*.md`).
+    """
     try:
         resolved = path.resolve()
     except OSError:
         resolved = path
-    for base in (claude_home(), codex_home(), system_temp_dir()):
+    for base in (claude_home(), codex_home(), system_temp_dir(), *classic_temp_dirs()):
         try:
             resolved.relative_to(base)
             return True

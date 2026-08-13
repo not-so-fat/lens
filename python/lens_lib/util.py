@@ -47,6 +47,24 @@ def system_temp_dir() -> Path:
     return Path(tempfile.gettempdir()).resolve()
 
 
+def classic_temp_dirs() -> tuple[Path, ...]:
+    """Classic Unix scratch dirs (`/tmp`, `/private/tmp`).
+
+    `$TMPDIR` (system_temp_dir) is `/var/folders/.../T` on macOS, but agent
+    harnesses stash session scratch under `/tmp` — e.g. Claude Code writes
+    `/private/tmp/claude-<uid>/…/scratchpad/*.md`. Those are never deliverables.
+    """
+    out: list[Path] = []
+    for candidate in ("/tmp", "/private/tmp"):
+        try:
+            resolved = Path(candidate).resolve()
+        except OSError:
+            continue
+        if resolved not in out:
+            out.append(resolved)
+    return tuple(out)
+
+
 def _workspace_key(workspace_root: str) -> str:
     return hashlib.sha256(str(Path(workspace_root).resolve()).encode("utf-8")).hexdigest()[
         :16
