@@ -54,15 +54,7 @@ def classic_temp_dirs() -> tuple[Path, ...]:
     harnesses stash session scratch under `/tmp` — e.g. Claude Code writes
     `/private/tmp/claude-<uid>/…/scratchpad/*.md`. Those are never deliverables.
     """
-    out: list[Path] = []
-    for candidate in ("/tmp", "/private/tmp"):
-        try:
-            resolved = Path(candidate).resolve()
-        except OSError:
-            continue
-        if resolved not in out:
-            out.append(resolved)
-    return tuple(out)
+    return tuple(dict.fromkeys(Path(c).resolve() for c in ("/tmp", "/private/tmp")))
 
 
 def _workspace_key(workspace_root: str) -> str:
