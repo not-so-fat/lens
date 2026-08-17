@@ -1,7 +1,7 @@
 # Lens efficiency — class sweep, fix-regression, cite-stability
 
 **Date:** 2026-08-17  
-**Status:** approved for planning  
+**Status:** implemented (PR #8)  
 **Branch:** `feat/lens-efficiency-class-sweep`  
 **Evidence:** 224 runs / 127 deliverables since 2026-08-01 (`~/.lens/lens_runs.jsonl`). Tail waste (≥5 rounds) clusters in `sibling-inconsistency` and `source-grounded` (pilot log analysis, Aug 2026). **Hypothesis** this spec targets: instance fixes leave sibling/cite drift that shows up one round late.
 

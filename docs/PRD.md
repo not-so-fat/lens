@@ -109,7 +109,7 @@ Acceptance:
 
 **US-2 (plugin). Run the loop.** As a worker agent, I want to invoke the runner with a lens **name** (plus round, deliverable key, files, prior findings) and get a verdict so simple issues resolve without the human.
 Acceptance:
-- [ ] runner reply contains verdict `PASS`/`FIX`/`ESCALATE` and findings matching §7.3 output shape
+- [ ] runner reply contains verdict `PASS`/`FIX`/`ESCALATE` and findings matching §7.3 output shape (including optional `class` when set)
 - [ ] every finding cites a `check` slug from the lens vocabulary (F2.3)
 - [ ] omitting `lens` uses config `default_lens`
 - [ ] with an unknown lens name or unreadable lens file, runner replies `LENS UNAVAILABLE: <name or path>` and produces no findings
@@ -174,6 +174,7 @@ Deferred stories (deck card fetch, correction-capture automation): see §10.
 | F2.2 | Runner resolves lens **name** → file path (`lenses` map, else `lenses_dir/<name>.md`) at invocation time; that file is the single source of truth (input shape §7.5) | editing the lens file changes the next run's checks with no plugin change; switching names selects a different file |
 | F2.3 | The bundled check-slug vocabulary lives in the runner agent file; a new slug is minted only when a finding fires on a check with no slug in the list — whether newly added to the lens or previously uncovered — after grepping the run log for an existing one | no two slugs for one lens question across the pilot log |
 | F2.4 | Terminal-round logging per §7.1 (`lens` = name); non-terminal rounds never log | US-4 acceptance |
+| F2.5 | Optional `class` on findings (§7.1); runner sets it for repeatable patterns with reuse-before-mint; rounds ≥2 prelude A (class verify) → B (fix-regression) → Process; round 1 cite-stability FIX with reserved `fragile-line-cites` | US-2 acceptance; append validator accepts optional `class`; schema fixture in tests |
 
 ### F3 — Enforcement (Stop hook)
 
@@ -254,7 +255,12 @@ All schemas are JSON Schema Draft 2020-12. Contracts directory in the plugin rep
           "target": { "type": "string" },
           "severity": { "enum": ["FIX", "ESCALATE"] },
           "reaction": { "enum": ["fixed", "fixed-class", "disputed", "escalated"] },
-          "note": { "type": "string" }
+          "note": { "type": "string" },
+          "class": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+            "description": "optional repeatable-class label; runner must set for class-sweep patterns"
+          }
         },
         "additionalProperties": false
       }
@@ -321,7 +327,7 @@ Input:
 }
 ```
 
-Output: verdict `PASS | FIX | ESCALATE`; findings and escalations exactly as they will be logged (§7.1 shapes). The reply also restates, on FIX, the loop instruction (fix the whole class, re-sweep, return with reactions).
+Output: verdict `PASS | FIX | ESCALATE`; findings and escalations exactly as they will be logged (§7.1 shapes, including optional `class`). On FIX, the reply requires class-wide sweep when `class` is set; worker must round-trip `class` in `prior_findings`.
 
 ### 7.4 `~/.lens/config.json`
 
