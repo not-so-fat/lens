@@ -1158,5 +1158,63 @@ class AttributionTests(unittest.TestCase):
                     os.environ["HOME"] = old_home
 
 
+class FindingShapeTests(unittest.TestCase):
+    """Optional class on findings — contract + append validator (F2.5)."""
+
+    def _record(self, findings):
+        return {
+            "ts": "2026-08-17T00:00:00Z",
+            "event": "lens_run",
+            "lens": "review",
+            "deliverable": "d",
+            "rounds": 1,
+            "verdict": "pass",
+            "findings": findings,
+            "escalations": [],
+        }
+
+    def test_finding_with_and_without_class(self):
+        from lens_lib.log import validate_lens_run_shape
+
+        base = {
+            "round": 1,
+            "check": "source-grounded",
+            "target": "t",
+            "severity": "FIX",
+            "reaction": "fixed",
+        }
+        self.assertEqual(validate_lens_run_shape(self._record([base])), [])
+        with_class = {**base, "class": "fragile-line-cites", "note": "n"}
+        self.assertEqual(validate_lens_run_shape(self._record([with_class])), [])
+
+    def test_rejects_unknown_finding_key(self):
+        from lens_lib.log import validate_lens_run_shape
+
+        finding = {
+            "round": 1,
+            "check": "x",
+            "target": "t",
+            "severity": "FIX",
+            "reaction": "fixed",
+            "extra": "nope",
+        }
+        errors = validate_lens_run_shape(self._record([finding]))
+        self.assertTrue(any("unknown keys" in e for e in errors))
+
+    def test_rejects_bad_class_pattern(self):
+        from lens_lib.log import validate_lens_run_shape
+
+        finding = {
+            "round": 1,
+            "check": "x",
+            "target": "t",
+            "severity": "FIX",
+            "reaction": "fixed",
+            "class": "Bad Class",
+        }
+        errors = validate_lens_run_shape(self._record([finding]))
+        self.assertTrue(any("bad class label" in e for e in errors))
+
+
 if __name__ == "__main__":
     unittest.main()

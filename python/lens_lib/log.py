@@ -11,6 +11,9 @@ from typing import Any, Dict, Iterator, List, Optional, Sequence
 from .util import utc_now_iso
 
 CHECK_SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+FINDING_KEYS = frozenset(
+    {"round", "check", "target", "severity", "reaction", "note", "class"}
+)
 
 
 def ensure_log(log_path: Path) -> Path:
@@ -242,6 +245,11 @@ def validate_lens_run_shape(record: Dict[str, Any]) -> List[str]:
             for k in ("round", "check", "target", "severity", "reaction"):
                 if k not in f:
                     errors.append(f"findings[{i}] missing {k}")
+            extra = set(f.keys()) - FINDING_KEYS
+            if extra:
+                errors.append(f"findings[{i}] unknown keys: {sorted(extra)}")
             if f.get("check") and not CHECK_SLUG_RE.match(str(f["check"])):
                 errors.append(f"findings[{i}] bad check slug")
+            if f.get("class") is not None and not CHECK_SLUG_RE.match(str(f["class"])):
+                errors.append(f"findings[{i}] bad class label")
     return errors
