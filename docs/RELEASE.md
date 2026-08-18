@@ -35,7 +35,7 @@ From a clean checkout of `main`:
 git checkout main
 git pull origin main
 
-# 2. Bump the four version fields if this cut is a new semver
+# 2. Bump the five version fields if this cut is a new semver
 #    (skip if already bumped in the merge)
 
 # 3. Tag + push
