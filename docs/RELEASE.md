@@ -4,7 +4,7 @@ Lens ships as a **GitHub repo marketplace** (Claude Code + Cursor). There is no 
 
 ## Version fields (keep in sync)
 
-Bump these four together (semver, currently `0.1.2`):
+Bump these five together (semver, currently `0.2.2`):
 
 | File | Field |
 | --- | --- |
@@ -12,6 +12,7 @@ Bump these four together (semver, currently `0.1.2`):
 | `.claude-plugin/marketplace.json` | plugin entry `version` |
 | `.cursor-plugin/plugin.json` | `version` |
 | `.cursor-plugin/marketplace.json` | `metadata.version` + plugin entry `version` |
+| `.codex-plugin/plugin.json` | `version` |
 
 Git tag form: `vMAJOR.MINOR.PATCH` (e.g. `v0.1.1`).
 
