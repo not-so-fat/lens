@@ -91,7 +91,7 @@ Primary persona: a product lead who produces documents, decks, and specs through
 
 | Role | Goal | Plugin surface |
 | --- | --- | --- |
-| Lens owner (human) | Standards enforced everywhere; final review only | named lenses in `~/.lens/config.json`; `/lens-close`; `/lens-doctor`; `lens add\|list\|remove` |
+| Lens owner (human) | Standards enforced everywhere; final review only | named lenses in `~/.lens/config.json`; `/lens-close`; `/lens-skip`; `/lens-doctor`; `lens add\|list\|remove` |
 | Worker agent | Pass the lens loop before surfacing a deliverable | `lens` subagent invocation contract (§7.3), Claude Code and Cursor |
 | Runner (`lens` subagent) | Execute a named lens; report FIX/ESCALATE/PASS; log terminal rounds | `agents/lens.md` (Claude Code) / `agents/cursor/lens.md` (Cursor) + run log (§7.1) |
 
@@ -123,9 +123,10 @@ Acceptance:
 
 **US-3 (plugin). Enforcement.** As a lens owner, I want a turn that wrote watched files blocked at its Stop-hook firing until a lens run is logged, so the loop cannot be silently skipped.
 Acceptance:
-- [ ] the Stop-hook firing blocks (exit 2, message names the missing step) when the session has written files matching `watch_globs` (fnmatch against cwd-relative and absolute paths; never `~/.claude/` or system temp — §7.4) and the log has no same-session `lens_run` with `ts` ≥ the transcript's first-event time
-- [ ] the firing passes when such a `lens_run` exists, when no watched files were written, or when `enforce=false`
-- [ ] (Claude Code) an explicit lens invocation in the prompt (`use <lens>`, `lens=<name>`, `run the lens`; negations do not count) **arms** the session, requiring a same-session `lens_run` **even with no watched writes** (§7.6 `armed`); it disarms once one lands. Because a prompt-text arm is a heuristic, enforcement is warn-first: the first unsatisfied stop only warns (`skip_reason=arm_warned`) and a later unsatisfied stop blocks, so a genuine arm that runs the lens after the warning never blocks. An unsatisfied arm is self-clearing — a 3-block circuit breaker (`arm_abandoned`) and a 2 h TTL (`arm_expired`) — so a false/abandoned arm can't wedge a session (I-9 hardening). Cursor arming is a follow-up (I-9)
+- [ ] the Stop-hook firing blocks (Claude Code via `{"decision":"block","reason":…}`, not exit-2-as-error; message names the missing step) when the session has written files matching `watch_globs` (fnmatch against cwd-relative and absolute paths; never `~/.claude/` or system temp — §7.4) and the log has no same-session `lens_run` **and no `lens_skip`** with `ts` ≥ the transcript's first-event time; it keeps blocking on each stop (a true loop) until one lands
+- [ ] the firing passes when such a `lens_run` **or a `lens_skip`** exists, when no watched files were written, or when `enforce=false`
+- [ ] a same-session `lens_skip` (F4.4 — the owner deliberately held) clears the block exactly as a `lens_run` does (`gate=declined`); this is the loop's second exit, replacing the old circuit-breaker/warn-first/TTL machinery
+- [ ] (Claude Code) an explicit lens invocation in the prompt (`use <lens>`, `lens=<name>`, `run the lens`; negations do not count) **arms** the session, requiring a same-session `lens_run` or `lens_skip` **even with no watched writes** (§7.6 `armed`); it disarms once one lands. The detector ignores negations/hedges and lens phrasing quoted inside injected wrappers (transcript fences, `<task-notification>`) or lens *tooling* (`lens doctor`/`lens close`/`lens skip`). A false or abandoned arm is cleared by recording a `lens_skip` — no self-clearing breaker/TTL needed. Cursor arming is a follow-up (I-9)
 - [ ] every firing appends a `hook_check` record (§7.6)
 - [ ] false-block rate meets NFR-3 (evaluated at M3, over the §9 window)
 
@@ -150,8 +151,8 @@ Acceptance:
 Acceptance:
 - [ ] `/lens-doctor` installs the Codex reviewer + `Stop`/`PostToolUse`/`UserPromptSubmit` hooks into `~/.codex/` and validates them (F6.5)
 - [ ] the Codex subagent reviews per §7.3 and logs per §7.1 with `host: "codex"`
-- [ ] a Codex turn that wrote a watched file via `apply_patch` is blocked at Stop until a same-session `lens_run` is logged; the block clears once it is (F6.2/F6.3)
-- [ ] an explicit lens invocation arms the session (warn-first, then blocks) with no watched writes (F6.4)
+- [ ] a Codex turn that wrote a watched file via `apply_patch` is blocked at Stop until a same-session `lens_run` (or `lens_skip`) is logged; the block clears once it is (F6.2/F6.3)
+- [ ] an explicit lens invocation arms the session (blocks until a `lens_run`, or a `lens_skip` if the owner holds) with no watched writes (F6.4)
 
 Deferred stories (deck card fetch, correction-capture automation): see §10.
 
@@ -180,8 +181,8 @@ Deferred stories (deck card fetch, correction-capture automation): see §10.
 
 | Req | Requirement | Acceptance |
 | --- | --- | --- |
-| F3.1 | The Stop hook fires at each turn end with the session transcript path; it detects session writes matching `watch_globs` (§7.4 matching rules) and checks `log_path` for a `lens_run` tagged with this session (or conversation) id and `ts` ≥ the transcript's first-event time. When the session was **armed** by an explicit lens invocation (F3.5) and no same-session `lens_run` has been logged since the arm, it warns on the first unsatisfied stop and blocks on a later one (warn-first, F3.5) | US-3 acceptance |
-| F3.5 | (Claude Code) A `UserPromptSubmit` hook arms the session (`~/.lens/sessions/<id>/armed.txt`) when the prompt affirmatively invokes the lens; the Stop gate then requires a `lens_run` regardless of writes, and disarms on satisfaction. Detector rejects negations/hedges and ignores lens phrasing quoted inside injected/quoted wrappers (transcript fences, `<task-notification>`) or lens *tooling* (`lens doctor`/`lens close`). Because the arm is a prompt-text heuristic, enforcement is **warn-first** (first unsatisfied stop warns, `skip_reason=arm_warned`; a later one blocks) and **self-clearing** — a 3-block circuit breaker (`arm_abandoned`) and a 2 h TTL (`arm_expired`) — so a false/abandoned arm cannot wedge the session. A watched-write block does not consume the arm's warn/breaker budget. Cursor arming (`beforeSubmitPrompt`) is deferred (I-9) | US-3 arming box |
+| F3.1 | The Stop hook fires at each turn end with the session transcript path; it detects session writes matching `watch_globs` (§7.4 matching rules) and checks `log_path` for a **`lens_run` or a `lens_skip`** tagged with this session (or conversation) id and `ts` ≥ the transcript's first-event time. If neither exists it blocks, and keeps blocking on each stop (a true loop) until one is logged. When the session was **armed** by an explicit lens invocation (F3.5) the same gate applies with no watched writes required. Claude Code blocks via `{"decision":"block","reason":…}` (enforcement feedback, not a "Stop hook error"). The loop has exactly two exits — a `lens_run` (the review happened) or a `lens_skip` (the owner deliberately held, §7.2b) — so there are no circuit breakers, TTLs, or block counters | US-3 acceptance |
+| F3.5 | (Claude Code) A `UserPromptSubmit` hook arms the session (`~/.lens/sessions/<id>/armed.txt`) when the prompt affirmatively invokes the lens; the Stop gate then requires a `lens_run` **or a `lens_skip`** regardless of writes, and disarms on satisfaction. Detector rejects negations/hedges and ignores lens phrasing quoted inside injected/quoted wrappers (transcript fences, `<task-notification>`) or lens *tooling* (`lens doctor`/`lens close`/`lens skip`). There is **no warn-first / circuit-breaker / TTL**: a false or abandoned arm is cleared the same way any hold is — the owner records a `lens_skip` (the loop's second exit), so no self-clearing machinery is needed. Cursor arming (`beforeSubmitPrompt`) is deferred (I-9) | US-3 arming box |
 | F3.2 | Block message tells the worker exactly what to do (invoke `lens` agent, deliverable key convention) | message contains the §7.3 invocation template |
 | F3.3 | `enforce=false` in config disables blocking but the hook still emits a one-line warning | toggling requires no reinstall |
 | F3.4 | Every firing appends a `hook_check` record (§7.6) to the run log, including its own `duration_ms` | §1 criterion 3, NFR-3, and NFR-4 are computable from the log alone |
@@ -193,6 +194,7 @@ Deferred stories (deck card fetch, correction-capture automation): see §10.
 | F4.1 | Log lives at config `log_path`; append-only; created on first write | 100% of pilot writes are single-line appends (NFR-2) |
 | F4.2 | `/lens-close` command appends a §7.2 record; refuses a deliverable key with no `lens_run` | US-5 acceptance |
 | F4.3 | `/lens-doctor` validates: config resolvable, every known named lens parses per §7.5, log writable, host hooks present, Cursor sandbox roots for lens directories, and (`marketplace_source`) that a `directory`-source lens marketplace — the local-dev install mode — does not point at a moved/deleted path | exits non-zero with a named failing check |
+| F4.4 | `/lens-skip` command appends a §7.2b `lens_skip` record — the loop's second exit — so the owner can deliberately hold a deliverable without a review; the Stop gate then clears for that session (`python -m lens_lib skip "<deliverable>" --session <id> [--reason …]`) | US-3 acceptance (a logged `lens_skip` clears a block) |
 
 ### F5 — Cursor support
 
@@ -212,7 +214,7 @@ Codex reaches parity with Claude/Cursor through the same shared `run_check` (F5.
 | F6.1 | Repo ships the Codex reviewer subagent template `agents/codex/lens.toml` (`sandbox_mode = "read-only"`, `developer_instructions` = F2.1 semantics resolving named lenses via `~/.lens/config.json`); read-only, so it emits `LENS_LOG_APPEND` for the worker to append (like the Cursor runner), `host: "codex"` | US-7 acceptance; diff vs the Cursor runner shows only host-format changes |
 | F6.2 | `PostToolUse` hook (`python/codex_post_tool_use.py`) records written paths to the shared side-channel; paths are extracted from `apply_patch` envelopes (`*** Update/Add/Delete File:`, `*** Move to:`) plus explicit `file_path` fields (`lens_lib.codex_writes`) | a `.md` edit via `apply_patch` is recorded; a read-only `shell` call records nothing |
 | F6.3 | `Stop` hook (`python/codex_stop.py`) calls shared `run_check(host="codex")` on the side-channel writes and blocks via `{"decision": "block", "reason": …}` when watched writes lack a same-session `lens_run`; passes otherwise; every firing appends `hook_check` with `host: "codex"` | US-7 acceptance; parity with F3.1 |
-| F6.4 | `UserPromptSubmit` hook (`python/codex_user_prompt.py`) arms the session on explicit lens invocation, same warn-first + self-clearing semantics as F3.5 (shared `arm_session`/breaker/TTL) | an armed session with no watched writes warns then blocks; a false/abandoned arm self-clears |
+| F6.4 | `UserPromptSubmit` hook (`python/codex_user_prompt.py`) arms the session on explicit lens invocation, same semantics as F3.5 (shared `arm_session`; blocks until a `lens_run` or `lens_skip`) | an armed session with no watched writes blocks until a `lens_run`, or a `lens_skip` if the owner holds |
 | F6.5 | `/lens-doctor` manages a Codex install: renders `agents/codex/lens.toml` + `hooks/codex-hooks.json` into `~/.codex/` with **absolute** script paths (no reliance on a plugin env var), non-destructively merging `~/.codex/hooks.json`; validates the log dir against `writable_roots` (guides, never mutates `config.toml`). Runs only when `~/.codex/` exists, so a Claude-only machine is untouched | `/lens-doctor` green includes `codex_hooks`, `codex_install`, `codex_writable_roots` |
 | F6.6 | Hook/command scripts stay Python 3 stdlib-only (F1.3); no third-party imports (`tomllib` is stdlib, guarded) | grep-verifiable |
 
@@ -302,6 +304,29 @@ All schemas are JSON Schema Draft 2020-12. Contracts directory in the plugin rep
 }
 ```
 
+### 7.2b `lens_skip` record
+
+The loop's **second exit** (F3.1): the owner deliberately held a review for a deliverable. Recorded (never a silent skip) and satisfies the Stop-hook gate for its session exactly as a `lens_run` does. Written by `/lens-skip` (F4.4) — `python -m lens_lib skip "<deliverable>" --session <id> [--reason …]`. Canonical schema: `contracts/lens_skip.schema.json`.
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lens_skip.schema.json",
+  "type": "object",
+  "required": ["ts", "event", "deliverable"],
+  "properties": {
+    "ts": { "type": "string", "format": "date-time" },
+    "event": { "const": "lens_skip" },
+    "deliverable": { "type": "string", "minLength": 1 },
+    "session": { "type": "string", "description": "session id whose gate this clears; omit only on Claude Bash appends" },
+    "session_ids": { "type": "array", "items": { "type": "string" } },
+    "reason": { "type": "string" },
+    "host": { "enum": ["claude-code", "cursor", "codex"] }
+  },
+  "additionalProperties": false
+}
+```
+
 ### 7.3 Runner invocation (worker → runner, prompt-mediated; typed fields)
 
 Input:
@@ -375,7 +400,7 @@ A lens is a markdown file resolved from a configured name (`lenses` map or `lens
 
 ### 7.6 `hook_check` record (appended by the Stop hook, F3.4)
 
-Canonical schema: `contracts/hook_check.schema.json`. Notable fields beyond the required core: `wrote_watched` (any watched activity in the session — M3 join key), `watched_writes` (unsatisfied remainder after Cursor `after_ts` filter), `armed` (session was armed by an explicit lens invocation — requires a `lens_run` regardless of writes, warn-first then blocks, F3.5), `session_ids`, `enforce`, `gate` (`none`|`time`|`session`), `excluded_writes`, `skip_reason` (adds `arm_warned` / `arm_abandoned` / `arm_expired` for the arming lifecycle).
+Canonical schema: `contracts/hook_check.schema.json`. Notable fields beyond the required core: `wrote_watched` (any watched activity in the session — M3 join key), `watched_writes` (unsatisfied remainder after Cursor `after_ts` filter), `armed` (session was armed by an explicit lens invocation — requires a `lens_run` or `lens_skip` regardless of writes, F3.5), `declined` (a `lens_skip` cleared the loop — the second exit, §7.2b), `session_ids`, `enforce`, `gate` (`none`|`time`|`session`|`declined`), `excluded_writes`, `skip_reason` (`declined` | `enforce_false` | `no_watch_match` | `excluded_only`).
 
 Shares the run-log file; analyses select by `event`, so the newest-record-per-deliverable rule for `lens_run` is unaffected. M3 uses `enforce=true ∧ wrote_watched=true → blocked=false`, not `watched_writes ∧ lens_run_found` (Cursor prune makes the latter structurally empty on healthy loops).
 

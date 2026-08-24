@@ -1,12 +1,30 @@
-"""Shared Stop/stop hook check logic (F3 / F5.4)."""
+"""Shared Stop/stop hook check logic (F3 / F5.4).
+
+The loop is deliberately simple: a stop with an unmet obligation blocks, and
+keeps blocking, until the obligation is resolved. An obligation has exactly two
+legitimate exits, and the hook only ever checks the run log for one of them:
+
+  1. a ``lens_run`` was logged for the session (the review happened), or
+  2. a ``lens_skip`` was logged for the session (the owner deliberately held).
+
+Two things create an obligation:
+
+  * a **watched-file write** with no matching lens_run/lens_skip, or
+  * an **explicit lens invocation** in the prompt ("arming", F3.5) — so a
+    chat deliverable that never wrote a file still gets reviewed.
+
+That shared second exit is why there are no circuit breakers, TTLs, or block
+counters here: the loop keeps looping until one of two *recorded, intentional*
+things happens. "Hold this one" is a real action the worker takes on the
+owner's say-so, not a heuristic the hook has to guess.
+"""
 
 from __future__ import annotations
 
 import os
 import re
 import time
-from dataclasses import dataclass
-from datetime import datetime, timezone
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -14,16 +32,17 @@ from .config import Config, ConfigError, resolve_config
 from .log import (
     append_record,
     has_lens_run_for_sessions,
+    has_lens_skip_for_sessions,
     latest_lens_run_ts,
 )
 from .paths import BUILTIN_IGNORE_GLOBS, filter_watched, load_lensignore
 from .transcript import gather_writes, prune_sidechannel_file, session_id_from_transcript
 from .util import (
     INVOCATION_TEMPLATE,
+    SKIP_TEMPLATE,
     conversation_workspace_writes_path,
     session_armed_path,
     session_writes_path,
-    sessions_root,
     utc_now_iso,
     workspace_writes_path,
 )
@@ -39,7 +58,8 @@ class CheckResult:
     duration_ms: float
     host: str
     message: str
-    watched_paths: List[str]
+    watched_paths: List[str] = field(default_factory=list)
+    declined: bool = False
     armed: bool = False
 
 
@@ -47,12 +67,12 @@ def _real_ids(ids: List[str]) -> List[str]:
     return [i for i in ids if i and i != "unknown"]
 
 
-# --- Explicit-invocation arming (I-9) ------------------------------------
+# --- Explicit-invocation arming (F3.5) -----------------------------------
 # A chat deliverable never writes a watched file, so the write-triggered gate
 # cannot catch "use <lens>". When the user explicitly asks for the lens, a
 # UserPromptSubmit hook arms the session; the Stop hook then requires a lens_run
-# regardless of writes — warn-first (the first unsatisfied stop warns, a later
-# one blocks) and self-clearing via a circuit breaker + TTL.
+# (or a lens_skip) regardless of writes. Arming reuses the same loop and the
+# same two exits — there is no separate warn-first / breaker / TTL machinery.
 
 # Negations / hedges that flip an otherwise-matching phrase ("don't use the lens").
 # The contraction alternative requires the apostrophe so ordinary words ending in
@@ -64,17 +84,9 @@ _NEG_RE = re.compile(
 _VERB = r"use|using|run|running|apply|applying|invoke|execute|redo\w*"
 
 # Arming must read the user's LIVE instruction, not machine-injected or quoted
-# content. Two harness wrappers were 100% of the stuck-block friction in the
-# run log — both saturate the prompt with lens phrasing that is not a request:
-#   1. Transcript-distillation prompts (lexicon et al.) fence a raw session
-#      transcript with BEGIN/END SESSION TRANSCRIPT — the transcript is full of
-#      "invoke the lens" / "Lens enforcement", arming the distiller on its own
-#      payload. Strip greedily to the LAST END marker so nested transcripts
-#      collapse; a BEGIN with no closing END drops to end-of-text.
-#   2. <task-notification> blocks (background-agent completion notices injected
-#      as a user turn) — e.g. a failed "Lens round 3" agent reporting "complete
-#      this lens review" re-arms the session.
-# Any live request OUTSIDE these wrappers is still scanned.
+# content. Two harness wrappers saturate the prompt with lens phrasing that is
+# not a request: transcript-distillation prompts fenced with BEGIN/END SESSION
+# TRANSCRIPT, and <task-notification> completion notices. Strip both first.
 _FENCE_BEGIN = re.compile(r"={3,}\s*BEGIN SESSION TRANSCRIPT\b", re.IGNORECASE)
 _FENCE_END = re.compile(r"={3,}\s*END SESSION TRANSCRIPT\s*={3,}", re.IGNORECASE)
 _TASK_NOTIF = re.compile(
@@ -100,15 +112,10 @@ def _strip_injected_blocks(text: str) -> str:
     return _TASK_NOTIF.sub(" ", _strip_transcript_blocks(text))
 
 
-# "lens doctor" / "lens close" (the /lens-doctor, /lens-close tooling commands,
-# whose expanded bodies say "Run the Lens doctor…") are lens *tooling*, not a
-# request to run the review lens — so a match ending in "lens" followed by one
-# of these must not arm. "doctor" is distinctive enough to suppress after any
-# separator; "close" is a common word, so suppress it only in its tooling forms
-# — hyphenated (`/lens-close`, `lens-close`) or the "close command" noun — while
-# a bare "lens close to <x>" is natural language that must still arm (I-9).
+# "lens doctor" / "lens close" are lens *tooling*, not a request to run the
+# review lens — a match ending in "lens" followed by one of these must not arm.
 _TOOLING_AFTER = re.compile(
-    r"[-\s]+doctor\b|-+close\b|\s+close\s+command\b", re.IGNORECASE
+    r"[-\s]+doctor\b|-+close\b|-+skip\b|\s+close\s+command\b", re.IGNORECASE
 )
 
 
@@ -121,8 +128,8 @@ def is_lens_invocation(prompt: str, known_names: Sequence[str] = ()) -> bool:
     True if the prompt explicitly and affirmatively asks to run the lens.
 
     Rejects negations/hedges ("don't use the lens", "without using the lens"),
-    unrelated senses ("eyeglasses lens metaphor", "lens documentation"), and
-    lens phrasing quoted inside a fenced raw transcript (distillation prompts).
+    unrelated senses ("eyeglasses lens metaphor"), and lens phrasing quoted
+    inside a fenced raw transcript or a <task-notification> wrapper.
     """
     if not isinstance(prompt, str) or not prompt:
         return False
@@ -149,7 +156,7 @@ def is_lens_invocation(prompt: str, known_names: Sequence[str] = ()) -> bool:
 
 
 def arm_session(session: str, *, ts: Optional[str] = None, reason: str = "explicit-invocation") -> None:
-    """Mark a session as requiring a lens_run before it may stop."""
+    """Mark a session as requiring a lens_run (or lens_skip) before it may stop."""
     if not session or session == "unknown":
         return
     path = session_armed_path(session)
@@ -181,81 +188,6 @@ def disarm_session(session: str) -> None:
         pass
 
 
-# Amplifier guards (RC2/RC3): an unsatisfied arm must be able to clear itself so
-# a false or abandoned arm cannot wedge a session. In the run log one arm blocked
-# 92 times in 10 minutes because the only exit was a logged lens_run.
-ARM_MAX_BLOCKS = 3            # circuit breaker: give up after this many blocks
-ARM_TTL_SECONDS = 2 * 60 * 60  # expiry: an arm older than this is stale
-
-
-def _arm_age_seconds(armed_ts: str) -> Optional[float]:
-    try:
-        t = datetime.fromisoformat(armed_ts.replace("Z", "+00:00"))
-    except (ValueError, AttributeError):
-        return None
-    if t.tzinfo is None:
-        t = t.replace(tzinfo=timezone.utc)
-    return (datetime.now(timezone.utc) - t).total_seconds()
-
-
-def record_arm_block(session: str) -> int:
-    """Increment this arm's unsatisfied-block counter and return the new count.
-
-    The counter lives on line 2 of armed.txt; line 1 (ts + reason) is preserved
-    so read_arm_ts is unaffected. A fresh arm_session() overwrites the file and
-    resets the counter, which is correct — a new invocation restarts the budget.
-    """
-    if not session or session == "unknown":
-        return 0
-    path = session_armed_path(session)
-    try:
-        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError:
-        return 0
-    if not lines:
-        return 0
-    n = 0
-    if len(lines) >= 2:
-        try:
-            n = int(lines[1].strip())
-        except ValueError:
-            n = 0
-    n += 1
-    try:
-        path.write_text(f"{lines[0]}\n{n}\n", encoding="utf-8")
-    except OSError:
-        pass
-    return n
-
-
-def armed_session_ids() -> List[str]:
-    """Session ids with a *live* arm (asked for a lens, still waiting).
-
-    A completed review credits these so the run satisfies the session that
-    requested it — even when the review ran in a different (sub-agent) session.
-    Reuses the arm mechanism's path (`session_armed_path` via `read_arm_ts`) and
-    liveness rule: a stale arm (older than `ARM_TTL_SECONDS`, which the block path
-    would expire) is not credited.
-    """
-    out: List[str] = []
-    try:
-        entries = sorted(sessions_root().iterdir())
-    except OSError:
-        return out
-    for d in entries:
-        # d.name is the _safe_session dir name; for UUID session ids (no `/`/`\`)
-        # it equals the raw id the gate matches on.
-        sid = d.name
-        armed_ts = read_arm_ts(sid)
-        if not armed_ts:
-            continue
-        age = _arm_age_seconds(armed_ts)
-        if age is not None and age > ARM_TTL_SECONDS:
-            continue
-        out.append(sid)
-    return out
-
-
 def run_check(
     *,
     host: str,
@@ -265,7 +197,13 @@ def run_check(
     cwd: Optional[str] = None,
     config: Optional[Config] = None,
 ) -> CheckResult:
-    """Evaluate whether this turn must invoke the lens runner before stopping."""
+    """Evaluate whether this turn must invoke the lens runner before stopping.
+
+    Blocks while the session has an unmet obligation (a watched write, or an
+    explicit lens invocation) with no matching ``lens_run`` and no matching
+    ``lens_skip``. The block persists across stops (a true loop) until one of
+    those two records lands.
+    """
     started = time.perf_counter()
     cwd = cwd or os.getcwd()
     ids: List[str] = []
@@ -294,7 +232,6 @@ def run_check(
             duration_ms=duration_ms,
             host=host,
             message=msg,
-            watched_paths=[],
         )
 
     side_paths: List[str] = [str(session_writes_path(sid)) for sid in ids if sid]
@@ -342,84 +279,54 @@ def run_check(
         written, cfg.watch_globs, cwd, ignore_globs=ignore_globs
     )
     watched_writes = len(watched) > 0
+    allow_untagged = bool(transcript_path)
+
+    # --- Writes gate ---
     lens_run_found = False
+    writes_declined = False
     gate = "none"
     if watched_writes:
-        # Session-scoped + time window. Claude may omit session on Bash-appended
-        # runs (allow_untagged); runs tagged for another session never match.
-        # Claude Stop always has a session id (payload or transcript stem).
         ids_for_gate = real or ([session] if session and session != "unknown" else [])
         if has_lens_run_for_sessions(
-            cfg.log_path,
-            ids_for_gate,
-            since_iso=first_ts,
-            allow_untagged=bool(transcript_path),
+            cfg.log_path, ids_for_gate, since_iso=first_ts, allow_untagged=allow_untagged
         ):
             lens_run_found = True
             gate = "session"
+        elif has_lens_skip_for_sessions(
+            cfg.log_path, ids_for_gate, since_iso=first_ts, allow_untagged=allow_untagged
+        ):
+            writes_declined = True
+            gate = "declined"
     elif wrote_watched and after_ts and real:
         # Cursor: writes existed but all fall at/before the latest session lens_run.
         lens_run_found = True
         gate = "session"
 
-    # Explicit-invocation arming (I-9): the user asked for the lens; require a
-    # lens_run for this session regardless of watched writes.
+    unsatisfied_writes = watched_writes and not lens_run_found and not writes_declined
+
+    # --- Arm gate (explicit invocation) ---
     armed_ts: Optional[str] = None
-    armed_ids: List[str] = []
     for sid in real:
         a = read_arm_ts(sid)
-        if a:
-            armed_ids.append(sid)
-            if armed_ts is None or a < armed_ts:
-                armed_ts = a
+        if a and (armed_ts is None or a < armed_ts):
+            armed_ts = a
     armed = armed_ts is not None
-    armed_satisfied = False
+    armed_by_run = False
+    arm_declined = False
     if armed:
-        armed_satisfied = has_lens_run_for_sessions(
-            cfg.log_path, real, since_iso=armed_ts, allow_untagged=bool(transcript_path)
+        armed_by_run = has_lens_run_for_sessions(
+            cfg.log_path, real, since_iso=armed_ts, allow_untagged=allow_untagged
         )
-        if armed_satisfied:
-            # A lens_run for this session was found — keep lens_run_found/gate
-            # consistent (gate="session" must not pair with lens_run_found=false).
-            lens_run_found = True
-            if gate == "none":
-                gate = "session"
+        if not armed_by_run:
+            arm_declined = has_lens_skip_for_sessions(
+                cfg.log_path, real, since_iso=armed_ts, allow_untagged=allow_untagged
+            )
+    armed_satisfied = armed_by_run or arm_declined
+    declined = writes_declined or arm_declined
 
-    # Amplifier guards (RC2/RC3): let an unsatisfied arm clear itself. Expire a
-    # stale arm; otherwise count this block and give up after ARM_MAX_BLOCKS so a
-    # false/abandoned arm can't wedge the session. `armed` stays truthful for the
-    # record; `arm_cleared` (surfaced via skip_reason) suppresses the block.
-    # Warn-first escalation (RC4): a prompt-text arm is a heuristic, so the first
-    # unsatisfied stop only warns; a later stop that still has no lens_run blocks
-    # (up to ARM_MAX_BLOCKS), then the breaker/TTL clear it. Genuine arms (agent
-    # runs the lens after the warning) never block; a false arm costs at most one
-    # warning before the first block.
-    # A watched-write stop blocks on its own (strong signal); the arm gate is
-    # moot on that stop, so don't let it consume the arm's warn/breaker budget —
-    # only escalate the arm when it is the operative reason to block.
-    block_writes = watched_writes and not lens_run_found
-    arm_cleared: Optional[str] = None
-    arm_warn = False
-    if armed and not armed_satisfied and cfg.enforce and not block_writes:
-        age = _arm_age_seconds(armed_ts)
-        if age is not None and age > ARM_TTL_SECONDS:
-            arm_cleared = "arm_expired"
-        else:
-            attempts = 0
-            for sid in armed_ids:
-                attempts = max(attempts, record_arm_block(sid))
-            if attempts <= 1:
-                arm_warn = True
-            elif attempts > 1 + ARM_MAX_BLOCKS:
-                arm_cleared = "arm_abandoned"
-        if arm_cleared:
-            for sid in armed_ids:
-                disarm_session(sid)
-
-    block_armed = (
-        armed and not armed_satisfied and arm_cleared is None and not arm_warn
-    )
-    should_block = bool(cfg.enforce and (block_writes or block_armed))
+    block_writes = bool(cfg.enforce and unsatisfied_writes)
+    block_armed = bool(cfg.enforce and armed and not armed_satisfied)
+    should_block = block_writes or block_armed
 
     sess_hint = (
         f" Ensure the lens_run includes session={session!r} "
@@ -427,35 +334,31 @@ def run_check(
         if host == "claude-code"
         else f" Ensure the lens_run includes session={session!r}."
     )
-    if arm_warn and not block_writes:
+    skip_hint = (
+        " If the owner told you to hold this one, record a skip instead so the "
+        f"loop stops without a review: {SKIP_TEMPLATE}"
+    )
+    if block_writes:
         message = (
-            "Lens enforcement: you invoked the lens for this session but no "
-            f"lens_run is logged yet ({armed_ts}). Run the `lens` agent before "
-            "finishing — the next stop will block until a lens_run is logged."
-            f"{sess_hint} {INVOCATION_TEMPLATE}"
+            "Lens enforcement: this session wrote watched files but no matching "
+            f"lens_run was logged at or after the session start ({first_ts or 'unknown'})."
+            f"{sess_hint} {INVOCATION_TEMPLATE}{skip_hint} "
+            f"Watched writes: {', '.join(watched[:8])}"
+            + ("…" if len(watched) > 8 else "")
         )
-    elif not (block_writes or block_armed):
-        message = ""
-    elif not cfg.enforce:
+    elif block_armed:
+        message = (
+            "Lens enforcement: you invoked the lens for this session but no matching "
+            f"lens_run has been logged since you asked ({armed_ts})."
+            f"{sess_hint} {INVOCATION_TEMPLATE}{skip_hint}"
+        )
+    elif (unsatisfied_writes or (armed and not armed_satisfied)) and not cfg.enforce:
         message = (
             "Warning: this session has a pending lens review "
             f"(enforce=false).{sess_hint} {INVOCATION_TEMPLATE}"
         )
-    elif block_writes:
-        message = (
-            "Lens enforcement: this session wrote watched files but no matching "
-            f"lens_run was logged at or after the session start ({first_ts or 'unknown'})."
-            f"{sess_hint} "
-            f"{INVOCATION_TEMPLATE} "
-            f"Watched writes: {', '.join(watched[:8])}"
-            + ("…" if len(watched) > 8 else "")
-        )
     else:
-        message = (
-            "Lens enforcement: you invoked the lens for this session but no matching "
-            f"lens_run has been logged since you asked ({armed_ts})."
-            f"{sess_hint} {INVOCATION_TEMPLATE}"
-        )
+        message = ""
 
     # A satisfied arm is consumed so later chat turns are not re-blocked.
     if armed and armed_satisfied:
@@ -474,15 +377,13 @@ def run_check(
     duration_ms = (time.perf_counter() - started) * 1000
 
     skip_reason = None
-    if arm_cleared:
-        skip_reason = arm_cleared
-    elif arm_warn and not should_block:
-        skip_reason = "arm_warned"
-    elif watched_writes and not cfg.enforce:
+    if declined:
+        skip_reason = "declined"
+    elif (unsatisfied_writes or (armed and not armed_satisfied)) and not cfg.enforce:
         skip_reason = "enforce_false"
-    elif not watched_writes and written_all and not wrote_watched:
+    elif not watched_writes and not armed and written_all and not wrote_watched:
         skip_reason = "no_watch_match"
-    elif excluded_count and not wrote_watched:
+    elif excluded_count and not wrote_watched and not armed:
         skip_reason = "excluded_only"
 
     record: Dict[str, Any] = {
@@ -494,6 +395,7 @@ def run_check(
         "wrote_watched": wrote_watched,
         "armed": armed,
         "lens_run_found": lens_run_found,
+        "declined": declined,
         "blocked": should_block,
         "enforce": cfg.enforce,
         "gate": gate,
@@ -518,6 +420,7 @@ def run_check(
         host=host,
         message=message,
         watched_paths=watched,
+        declined=declined,
         armed=armed,
     )
 

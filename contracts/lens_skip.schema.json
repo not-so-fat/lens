@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lens_skip.schema.json",
+  "type": "object",
+  "description": "The loop's second exit: the owner deliberately held a review for a deliverable. Recorded (never silent) and satisfies the Stop-hook gate for its session exactly as a lens_run does.",
+  "required": ["ts", "event", "deliverable"],
+  "properties": {
+    "ts": { "type": "string", "format": "date-time" },
+    "event": { "const": "lens_skip" },
+    "deliverable": { "type": "string", "minLength": 1 },
+    "session": {
+      "type": "string",
+      "description": "conversation/session id whose Stop gate this skip clears; omit only on Claude Bash appends (allow_untagged)"
+    },
+    "session_ids": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "reason": { "type": "string", "description": "why the review was held" },
+    "host": { "enum": ["claude-code", "cursor", "codex"] }
+  },
+  "additionalProperties": false
+}

@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Codex UserPromptSubmit hook — arm the session on explicit lens invocation.
+"""Codex UserPromptSubmit hook — arm the session on explicit lens invocation (F6.4).
 
 Parity with the Claude arming hook: a chat deliverable never writes a watched
 file, so "use <lens>" can't be caught by the write gate. When the user
-explicitly asks for the lens, arm the session; the Stop hook then warns and, on
-a later unsatisfied stop, blocks until a lens_run is logged (warn-first,
-self-clearing via the shared circuit breaker + TTL).
+explicitly asks for the lens, arm the session; the Stop hook then blocks until a
+lens_run (or a lens_skip, if the owner holds) is logged.
 """
 
 from __future__ import annotations
@@ -50,8 +49,8 @@ def main() -> int:
         print(
             "[lens] Explicit lens invocation detected. Before ending this turn you "
             "MUST run the `lens` agent on the deliverable and log a lens_run for "
-            "this session (include \"session\"); otherwise the Stop hook will warn "
-            "and then block on a later stop until a lens_run is logged."
+            "this session (include \"session\"), or record a lens_skip if the owner "
+            "told you to hold; otherwise the Stop hook will block until one is logged."
         )
     return 0
 

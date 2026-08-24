@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Claude Code Stop hook entry — exit 2 to block (F3)."""
+"""Claude Code Stop hook entry (F3).
+
+Blocks via ``{"decision": "block", "reason": …}`` on stdout (exit 0) — the same
+structured form Codex uses. This surfaces as enforcement *feedback*, not a
+"Stop hook error": the hook is deciding to block, not failing.
+"""
 
 from __future__ import annotations
 
@@ -31,14 +36,14 @@ def main() -> int:
         cwd=cwd,
     )
 
-    if result.message and not result.blocked:
-        # enforce=false warning
+    out = {}
+    if result.blocked and result.message:
+        out = {"decision": "block", "reason": result.message}
+    elif result.message and not result.blocked:
+        # enforce=false warning — surface without blocking.
         print(result.message, file=sys.stderr)
 
-    if result.blocked:
-        # Claude Code: exit 2 + stderr message blocks stop
-        print(result.message, file=sys.stderr)
-        return 2
+    print(json.dumps(out))
     return 0
 
 

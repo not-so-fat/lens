@@ -1,4 +1,4 @@
-"""CLI: python -m lens_lib <doctor|close|append-run|record-write|lens|corrections>"""
+"""CLI: python -m lens_lib <doctor|close|skip|append-run|record-write|lens|corrections>"""
 
 from __future__ import annotations
 
@@ -46,6 +46,24 @@ def cmd_close(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_skip(args: argparse.Namespace) -> int:
+    from .skip import skip_deliverable
+
+    try:
+        record, path = skip_deliverable(
+            args.deliverable,
+            session=args.session,
+            reason=args.reason,
+            host=args.host,
+        )
+    except Exception as e:
+        print(f"lens-skip: {e}", file=sys.stderr)
+        return 1
+    print(json.dumps(record, ensure_ascii=False))
+    print(f"appended to {path}", file=sys.stderr)
+    return 0
+
+
 def cmd_append_run(args: argparse.Namespace) -> int:
     from .config import resolve_config
     from .log import append_record, is_duplicate_lens_run, validate_lens_run_shape
@@ -61,23 +79,6 @@ def cmd_append_run(args: argparse.Namespace) -> int:
         record["host"] = args.host
     if getattr(args, "session", None):
         record["session"] = args.session
-    # Credit any session with a live arm, so a review satisfies the session that
-    # requested it even when it ran in a different (sub-agent) session.
-    # Crediting is lens-AGNOSTIC: the run's `lens` is not matched against what each
-    # armed session asked for. On a single-user sequential machine that is
-    # harmless; with concurrent chats armed for *different* lenses, a review for
-    # one can clear another's arm (a bounded false-clear — arms still self-expire
-    # via TTL/circuit-breaker). Matching by lens would require arming to record the
-    # requested lens name; deferred. See check.armed_session_ids.
-    from .check import armed_session_ids
-
-    armed = armed_session_ids()
-    if armed:
-        ids = list(record.get("session_ids") or [])
-        for sid in armed:
-            if sid and sid not in ids:
-                ids.append(sid)
-        record["session_ids"] = ids
     errors = validate_lens_run_shape(record)
     if errors:
         print("append-run: " + "; ".join(errors), file=sys.stderr)
@@ -250,6 +251,16 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_close.add_argument("--miss", action="append", default=[])
     p_close.add_argument("--noise", action="append", default=[])
     p_close.set_defaults(func=cmd_close)
+
+    p_skip = sub.add_parser("skip", help="append lens_skip (owner deliberately held)")
+    p_skip.add_argument("deliverable")
+    p_skip.add_argument(
+        "--session",
+        help="conversation/session id to stamp so the Stop gate clears for it",
+    )
+    p_skip.add_argument("--reason", help="why the review was held")
+    p_skip.add_argument("--host", choices=["claude-code", "cursor", "codex"])
+    p_skip.set_defaults(func=cmd_skip)
 
     p_app = sub.add_parser("append-run", help="append lens_run JSON")
     p_app.add_argument("--json", help="lens_run JSON object")

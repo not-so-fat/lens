@@ -91,30 +91,30 @@ def _lens_run_session_ids(rec: Dict[str, Any]) -> set:
     return ids
 
 
-def has_lens_run_for_sessions(
+def _has_event_for_sessions(
     log_path: Path,
     session_ids: Sequence[str],
+    event: str,
     *,
     since_iso: Optional[str] = None,
     allow_untagged: bool = False,
 ) -> bool:
     """
-    True if a lens_run satisfies this session's gate.
+    True if a record of ``event`` satisfies this session's gate.
 
     - Tagged with this session (or conversation) id, or
     - Untagged (no session fields) when allow_untagged=True — forgives Claude
-      Bash-appended runs that omit session; still rejects runs tagged for a
-      *different* session (keeps cross-chat leak closed).
+      Bash-appended records that omit session; still rejects records tagged for
+      a *different* session (keeps cross-chat leak closed).
 
     Optional since_iso requires ts ≥ that instant.
-    Both pass and escalated verdicts count.
     """
     wanted = {str(s) for s in session_ids if s and s != "unknown"}
     if not wanted and not allow_untagged:
         return False
     since = parse_iso_ts(since_iso) if since_iso else None
     for rec in iter_records(log_path):
-        if rec.get("event") != "lens_run":
+        if rec.get("event") != event:
             continue
         rec_ids = _lens_run_session_ids(rec)
         if rec_ids:
@@ -128,6 +128,34 @@ def has_lens_run_for_sessions(
         if ts is not None and ts >= since:
             return True
     return False
+
+
+def has_lens_run_for_sessions(
+    log_path: Path,
+    session_ids: Sequence[str],
+    *,
+    since_iso: Optional[str] = None,
+    allow_untagged: bool = False,
+) -> bool:
+    """True if a lens_run satisfies this session's gate (pass or escalated)."""
+    return _has_event_for_sessions(
+        log_path, session_ids, "lens_run",
+        since_iso=since_iso, allow_untagged=allow_untagged,
+    )
+
+
+def has_lens_skip_for_sessions(
+    log_path: Path,
+    session_ids: Sequence[str],
+    *,
+    since_iso: Optional[str] = None,
+    allow_untagged: bool = False,
+) -> bool:
+    """True if a lens_skip (owner deliberately held) satisfies this session's gate."""
+    return _has_event_for_sessions(
+        log_path, session_ids, "lens_skip",
+        since_iso=since_iso, allow_untagged=allow_untagged,
+    )
 
 
 def latest_lens_run_ts(
@@ -231,6 +259,22 @@ def latest_lens_run_for_deliverable(
             latest = ts
             latest_rec = rec
     return latest_rec
+
+
+def validate_lens_skip_shape(record: Dict[str, Any]) -> List[str]:
+    errors: List[str] = []
+    for k in ("ts", "event", "deliverable"):
+        if k not in record:
+            errors.append(f"missing {k}")
+    if record.get("event") != "lens_skip":
+        errors.append("event must be lens_skip")
+    if not str(record.get("deliverable") or "").strip():
+        errors.append("deliverable must be non-empty")
+    allowed = {"ts", "event", "deliverable", "session", "session_ids", "reason", "host"}
+    extra = set(record.keys()) - allowed
+    if extra:
+        errors.append(f"unknown keys: {sorted(extra)}")
+    return errors
 
 
 def validate_lens_run_shape(record: Dict[str, Any]) -> List[str]:
