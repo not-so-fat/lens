@@ -1,4 +1,4 @@
-"""CLI: python -m lens_lib <doctor|close|append-run|record-write|lens>"""
+"""CLI: python -m lens_lib <doctor|close|append-run|record-write|lens|corrections>"""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ def cmd_close(args: argparse.Namespace) -> int:
     from .close import close_deliverable
 
     try:
-        record, path = close_deliverable(
+        record, path, signals = close_deliverable(
             args.deliverable,
             args.corrections,
             misses=args.miss or None,
@@ -40,6 +40,9 @@ def cmd_close(args: argparse.Namespace) -> int:
         return 1
     print(json.dumps(record, ensure_ascii=False))
     print(f"appended to {path}", file=sys.stderr)
+    if signals:
+        ids = ", ".join(s["id"] for s in signals)
+        print(f"correction signals: {ids}", file=sys.stderr)
     return 0
 
 
@@ -142,6 +145,94 @@ def cmd_lens_remove(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_corrections_list(args: argparse.Namespace) -> int:
+    from .corrections import list_patches, list_signals
+
+    status = None if args.status == "all" else args.status
+    if args.kind in ("signals", "both"):
+        sig_status = status
+        if status == "proposed":
+            sig_status = "open"
+        signals = list_signals(lens=args.lens, status=sig_status)
+        for rec in signals:
+            print(json.dumps(rec, ensure_ascii=False))
+    if args.kind in ("patches", "both"):
+        pat_status = status
+        if status == "open":
+            pat_status = "proposed"
+        patches = list_patches(lens=args.lens, status=pat_status)
+        for rec in patches:
+            print(json.dumps(rec, ensure_ascii=False))
+    return 0
+
+
+def cmd_corrections_show(args: argparse.Namespace) -> int:
+    from .corrections import get_patch, get_signal, preview_patch
+
+    item_id = args.id
+    if item_id.startswith("cs_"):
+        rec = get_signal(item_id)
+        if not rec:
+            print(f"corrections: unknown signal {item_id!r}", file=sys.stderr)
+            return 1
+        print(json.dumps(rec, ensure_ascii=False, indent=2))
+        return 0
+    if item_id.startswith("lp_"):
+        rec = get_patch(item_id)
+        if not rec:
+            print(f"corrections: unknown patch {item_id!r}", file=sys.stderr)
+            return 1
+        print(json.dumps(rec, ensure_ascii=False, indent=2))
+        if args.diff:
+            print(preview_patch(item_id), end="")
+        return 0
+    print(f"corrections: id must start with cs_ or lp_", file=sys.stderr)
+    return 1
+
+
+def cmd_corrections_propose(args: argparse.Namespace) -> int:
+    from .corrections import preview_patch, propose_patch
+
+    raw = Path(args.ops_file).read_text(encoding="utf-8")
+    try:
+        ops_payload = json.loads(raw)
+    except json.JSONDecodeError as e:
+        print(f"corrections propose: invalid JSON: {e}", file=sys.stderr)
+        return 1
+    ops = ops_payload if isinstance(ops_payload, list) else ops_payload.get("ops")
+    if not isinstance(ops, list) or not ops:
+        print("corrections propose: ops file must be a JSON array or {ops: [...]}", file=sys.stderr)
+        return 1
+    signal_ids = [s.strip() for s in args.signal_ids.split(",") if s.strip()]
+    try:
+        patch = propose_patch(
+            lens=args.lens,
+            signal_ids=signal_ids,
+            ops=ops,
+            force=args.force,
+        )
+    except Exception as e:
+        print(f"corrections propose: {e}", file=sys.stderr)
+        return 1
+    print(json.dumps(patch, ensure_ascii=False, indent=2))
+    if args.preview:
+        print(preview_patch(patch["id"]), end="")
+    return 0
+
+
+def cmd_corrections_apply(args: argparse.Namespace) -> int:
+    from .corrections import apply_patch
+
+    try:
+        path, patch = apply_patch(args.patch_id)
+    except Exception as e:
+        print(f"corrections apply: {e}", file=sys.stderr)
+        return 1
+    print(f"applied {patch['id']} → {path}")
+    print("run /lens-doctor to verify; consider committing your lens file.", file=sys.stderr)
+    return 0
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(prog="lens_lib")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -190,6 +281,40 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_rm = lens_sub.add_parser("remove", help="unregister a named lens")
     p_rm.add_argument("name")
     p_rm.set_defaults(func=cmd_lens_remove)
+
+    p_corr = sub.add_parser("corrections", help="correction capture rail")
+    corr_sub = p_corr.add_subparsers(dest="corr_cmd", required=True)
+
+    p_cl = corr_sub.add_parser("list", help="list signals and/or patches")
+    p_cl.add_argument("--lens", help="filter by lens name")
+    p_cl.add_argument(
+        "--status",
+        default="open",
+        choices=["open", "actioned", "discarded", "proposed", "accepted", "all"],
+    )
+    p_cl.add_argument(
+        "--kind",
+        default="both",
+        choices=["signals", "patches", "both"],
+    )
+    p_cl.set_defaults(func=cmd_corrections_list)
+
+    p_cs = corr_sub.add_parser("show", help="show one signal or patch")
+    p_cs.add_argument("id", help="cs_… or lp_…")
+    p_cs.add_argument("--diff", action="store_true", help="for lp_…, print markdown diff")
+    p_cs.set_defaults(func=cmd_corrections_show)
+
+    p_cp = corr_sub.add_parser("propose", help="propose lens patch from signals")
+    p_cp.add_argument("--lens", required=True)
+    p_cp.add_argument("--signal-ids", required=True, help="comma-separated cs_… ids")
+    p_cp.add_argument("--ops-file", required=True, help="JSON file with ops array")
+    p_cp.add_argument("--force", action="store_true", help="allow single signal")
+    p_cp.add_argument("--preview", action="store_true", help="print diff after propose")
+    p_cp.set_defaults(func=cmd_corrections_propose)
+
+    p_ca = corr_sub.add_parser("apply", help="apply proposed patch to lens file")
+    p_ca.add_argument("patch_id", help="lp_…")
+    p_ca.set_defaults(func=cmd_corrections_apply)
 
     args = parser.parse_args(argv)
     return args.func(args)

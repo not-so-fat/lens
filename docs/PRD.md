@@ -403,7 +403,7 @@ Shares the run-log file; analyses select by `event`, so the newest-record-per-de
 - Cursor CLI surface (hook delivery documented-limited and reported unreliable — feasibility section; desktop IDE only in this release)
 - Codex IDE extension surface (hooks undocumented — F6 covers CLI + desktop only)
 - Team/shared lenses; any multi-user concern
-- Correction-capture automation — **spec ready:** `docs/PRD_CORRECTION_CAPTURE.md` (v1: `/lens-close` → signals → CLI propose/apply; not yet implemented)
+- Correction-capture automation — implemented: `docs/PRD_CORRECTION_CAPTURE.md` (`/lens-close` → `~/.lens/correction_signals.jsonl` → `python -m lens_lib corrections propose|apply`)
 - agent-dealer gate integration; standalone product
 - Windows/Linux support
 - Runner latency telemetry (per-round timing is not recorded in the plugin release; only hook overhead is measured)

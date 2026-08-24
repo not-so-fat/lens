@@ -6,6 +6,7 @@ import re
 from typing import List, Optional, Tuple
 
 from .config import resolve_config
+from .corrections import capture_from_human_review
 from .log import append_record, deliverable_has_lens_run
 from .util import utc_now_iso
 
@@ -27,7 +28,7 @@ def close_deliverable(
     corrections: int,
     misses: Optional[List[str]] = None,
     noise: Optional[List[str]] = None,
-) -> Tuple[dict, str]:
+) -> Tuple[dict, str, List[dict]]:
     cfg = resolve_config()
     if not deliverable_has_lens_run(cfg.log_path, deliverable):
         raise ValueError(
@@ -44,4 +45,12 @@ def close_deliverable(
     if noise:
         record["noise"] = parse_tagged(noise)
     path = append_record(cfg.log_path, record)
-    return record, str(path)
+    signals = []
+    if record.get("misses") or record.get("noise"):
+        signals = capture_from_human_review(
+            deliverable=deliverable,
+            misses=record.get("misses"),
+            noise=record.get("noise"),
+            log_path=cfg.log_path,
+        )
+    return record, str(path), signals

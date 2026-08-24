@@ -28,7 +28,7 @@ from .codex_config import (
     ensure_codex_install,
     writable_roots_status,
 )
-from .util import claude_home, codex_home, cursor_home, expand_path
+from .util import claude_home, codex_home, correction_signals_path, cursor_home, expand_path, lens_patches_path
 
 
 @dataclass
@@ -358,6 +358,18 @@ def run_doctor(
         report.add("log_writable", writable, str(cfg.log_path))
     except OSError as e:
         report.add("log_writable", False, str(e))
+
+    try:
+        sig_path = ensure_log(correction_signals_path())
+        pat_path = ensure_log(lens_patches_path())
+        corr_ok = os.access(sig_path.parent, os.W_OK)
+        report.add(
+            "correction_logs_writable",
+            corr_ok,
+            f"{sig_path}, {pat_path}",
+        )
+    except OSError as e:
+        report.add("correction_logs_writable", False, str(e))
 
     plugin_root = _plugin_root()
     ok_c, detail_c = _hooks_registered_claude(plugin_root)

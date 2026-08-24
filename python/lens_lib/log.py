@@ -215,6 +215,24 @@ def deliverable_has_lens_run(log_path: Path, deliverable: str) -> bool:
     return False
 
 
+def latest_lens_run_for_deliverable(
+    log_path: Path, deliverable: str
+) -> Optional[Dict[str, Any]]:
+    """Most recent lens_run for a deliverable key (by ts)."""
+    latest: Optional[datetime] = None
+    latest_rec: Optional[Dict[str, Any]] = None
+    for rec in iter_records(log_path):
+        if rec.get("event") != "lens_run" or rec.get("deliverable") != deliverable:
+            continue
+        ts = parse_iso_ts(str(rec.get("ts") or ""))
+        if ts is None:
+            continue
+        if latest is None or ts > latest:
+            latest = ts
+            latest_rec = rec
+    return latest_rec
+
+
 def validate_lens_run_shape(record: Dict[str, Any]) -> List[str]:
     errors: List[str] = []
     required = [

@@ -466,7 +466,7 @@ class LogAndCheckTests(unittest.TestCase):
                         "escalations": [],
                     },
                 )
-                rec, _ = close_deliverable("d1", 0)
+                rec, _, _ = close_deliverable("d1", 0)
                 self.assertEqual(rec["event"], "human_review")
             finally:
                 if old_home is None:

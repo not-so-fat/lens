@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lens_patch.schema.json",
+  "type": "object",
+  "required": [
+    "id",
+    "status",
+    "lens",
+    "lens_path",
+    "ops",
+    "signal_ids",
+    "created_at"
+  ],
+  "properties": {
+    "id": { "type": "string", "pattern": "^lp_[a-z0-9]+$" },
+    "status": { "enum": ["proposed", "accepted", "rejected", "superseded"] },
+    "lens": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
+    "lens_path": { "type": "string", "minLength": 1 },
+    "ops": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/op" }
+    },
+    "signal_ids": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^cs_[a-z0-9]+$" }
+    },
+    "evidence": {
+      "type": "object",
+      "properties": {
+        "notes": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "created_at": { "type": "string", "format": "date-time" },
+    "supersedes": { "type": "string", "pattern": "^lp_[a-z0-9]+$" }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "op": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["op", "block", "bullet"],
+          "properties": {
+            "op": { "const": "add_check" },
+            "block": { "type": "string", "minLength": 1 },
+            "bullet": { "type": "string", "minLength": 1 },
+            "check": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["op", "check", "bullet"],
+          "properties": {
+            "op": { "const": "amend_check" },
+            "check": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
+            "bullet": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["op", "bullet"],
+          "properties": {
+            "op": { "const": "add_guard" },
+            "bullet": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}

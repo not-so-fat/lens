@@ -1,7 +1,7 @@
 # Lens correction capture — PRD
 
-**Date:** 2026-08-23 · **Status:** Draft · **Repo:** lens  
-**Prior art:** [PRD.md](./PRD.md) §10 (correction-capture automation deferred), [human_review schema](../contracts/human_review.schema.json), lens file shape PRD §7.5  
+**Date:** 2026-08-23 · **Status:** Implemented (v1 CLI) · **Repo:** lens  
+**Prior art:** [PRD.md](./PRD.md) §10 (correction-capture automation), [human_review schema](../contracts/human_review.schema.json), lens file shape PRD §7.5  
 **Implementation plan:** [correction-capture-plan.md](./correction-capture-plan.md)  
 **Cross-product:** agent-deck [PRD_FEEDBACK_ACCUMULATION.md](../agent-deck/docs/PRD_FEEDBACK_ACCUMULATION.md) — same *learning-loop shape*, different artifact (taste vs procedure)  
 **Inspiration:** [Agentic Transaction](https://arxiv.org/html/2608.13900v1) — failed attempts must not poison durable state; only validated corrections promote into permanent standards.

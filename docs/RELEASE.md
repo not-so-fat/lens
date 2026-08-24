@@ -4,7 +4,7 @@ Lens ships as a **GitHub repo marketplace** (Claude Code + Cursor). There is no 
 
 ## Version fields (keep in sync)
 
-Bump these five together (semver, currently `0.2.3`):
+Bump these five together (semver, currently `0.2.4`):
 
 | File | Field |
 | --- | --- |

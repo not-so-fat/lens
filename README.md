@@ -151,6 +151,17 @@ On a terminal round it appends one `lens_run` (field `lens` = name) to `log_path
 /lens-close "my-deliverable-key" corrections=0
 ```
 
+Misses and noise from `/lens-close` append durable **correction signals** under `~/.lens/`. When the same gap shows up twice, propose a lens criteria update and apply it after review:
+
+```bash
+PYTHONPATH=python python3 -m lens_lib corrections list --lens review
+PYTHONPATH=python python3 -m lens_lib corrections propose \
+  --lens review --signal-ids cs_a,cs_b --ops-file ops.json --preview
+PYTHONPATH=python python3 -m lens_lib corrections apply lp_…
+```
+
+Spec: [`docs/PRD_CORRECTION_CAPTURE.md`](docs/PRD_CORRECTION_CAPTURE.md).
+
 ### Chat deliverables & explicit invocation
 
 Enforcement normally fires on writes to `watch_globs` files. A deliverable produced **in the chat** (analysis, comparison, summary) writes no file, so the write gate can't see it. But on **Claude Code and Codex**, when you **explicitly ask for the lens** — e.g. `use yusuke lens`, `lens=deck`, `run the lens`, `with yusuke lens` — a `UserPromptSubmit` hook **arms** the session: the Stop hook then requires a `lens_run` for it, **regardless of writes**, and disarms once the run lands. Because a prompt-text arm is a heuristic, enforcement is warn-first — the first unsatisfied stop only warns, a later one blocks — and self-clearing (a 3-block circuit breaker + a 2 h TTL) so a false or abandoned arm can't wedge the session. So an explicit request is enforced for chat work too. (Negated/hedged mentions — "don't use the lens" — do not arm.) A review that runs in a **sub-agent** still satisfies the parent session's gate: `append-run` credits any live armed session.

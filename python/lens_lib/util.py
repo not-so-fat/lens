@@ -35,6 +35,14 @@ def lens_config_path() -> Path:
     return expand_path("~/.lens/config.json")
 
 
+def correction_signals_path() -> Path:
+    return expand_path("~/.lens/correction_signals.jsonl")
+
+
+def lens_patches_path() -> Path:
+    return expand_path("~/.lens/lens_patches.jsonl")
+
+
 def system_temp_dir() -> Path:
     return Path(tempfile.gettempdir()).resolve()
 
