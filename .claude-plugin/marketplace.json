@@ -10,7 +10,7 @@
       "name": "lens",
       "source": "./",
       "description": "Personal review lens runner, Stop-hook enforcement, and run log for Claude Code",
-      "version": "0.2.2",
+      "version": "0.2.3",
       "category": "productivity",
       "keywords": ["lens", "review", "enforcement"]
     }
