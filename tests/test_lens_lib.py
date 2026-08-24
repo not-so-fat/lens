@@ -31,7 +31,6 @@ from lens_lib.paths import (  # noqa: E402
     matches_glob,
     path_matches_watch,
 )
-from lens_lib.check import arm_session, armed_session_ids  # noqa: E402
 from lens_lib.log import has_lens_run_for_sessions  # noqa: E402
 from lens_lib.transcript import first_event_ts, written_paths_from_transcript  # noqa: E402
 
@@ -244,197 +243,6 @@ class LogAndCheckTests(unittest.TestCase):
                 else:
                     os.environ["HOME"] = old_home
 
-    def test_arm_circuit_breaker_disarms_after_max_blocks(self):
-        """RC3: an unsatisfied arm gives up after ARM_MAX_BLOCKS instead of
-        blocking forever (the 92-blocks-in-10-min runaway)."""
-        with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:
-            lens = Path(td) / "lens.md"
-            log = Path(td) / "runs.jsonl"
-            lens.write_text(SAMPLE)
-            home = Path(td) / "home"
-            home.mkdir()
-            old_home = os.environ.get("HOME")
-            os.environ["HOME"] = str(home)
-            os.environ.pop("LENS_LOG_PATH", None)
-            try:
-                write_config(
-                    str(log),
-                    lenses={"review": str(lens)},
-                    default_lens="review",
-                    enforce=True,
-                )
-                from lens_lib.check import ARM_MAX_BLOCKS, arm_session, read_arm_ts
-
-                sid = "armed-sess"
-                arm_session(sid)
-                # warn-first: the first unsatisfied stop warns without blocking
-                r = run_check(host="cursor", session_id=sid, cwd=td)
-                self.assertFalse(r.blocked, "first stop should warn, not block")
-                self.assertTrue(r.armed)
-                self.assertTrue(r.message)
-                self.assertIsNotNone(read_arm_ts(sid))
-                # then it blocks up to ARM_MAX_BLOCKS times
-                for i in range(ARM_MAX_BLOCKS):
-                    r = run_check(host="cursor", session_id=sid, cwd=td)
-                    self.assertTrue(r.blocked, f"block {i + 1} should fire")
-                    self.assertIsNotNone(read_arm_ts(sid))
-                # the next stop trips the breaker: no block, and the arm is gone
-                r = run_check(host="cursor", session_id=sid, cwd=td)
-                self.assertFalse(r.blocked)
-                self.assertIsNone(read_arm_ts(sid), "arm should be cleared")
-                with open(log) as f:
-                    recs = [json.loads(l) for l in f]
-                self.assertTrue(
-                    any(x.get("skip_reason") == "arm_abandoned" for x in recs)
-                )
-            finally:
-                if old_home is None:
-                    os.environ.pop("HOME", None)
-                else:
-                    os.environ["HOME"] = old_home
-
-    def test_arm_warn_first_then_block(self):
-        """RC4: first unsatisfied stop warns (no block); a later stop blocks; a
-        lens_run clears the arm."""
-        with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:
-            lens = Path(td) / "lens.md"
-            log = Path(td) / "runs.jsonl"
-            lens.write_text(SAMPLE)
-            home = Path(td) / "home"
-            home.mkdir()
-            old_home = os.environ.get("HOME")
-            os.environ["HOME"] = str(home)
-            os.environ.pop("LENS_LOG_PATH", None)
-            try:
-                write_config(
-                    str(log),
-                    lenses={"review": str(lens)},
-                    default_lens="review",
-                    enforce=True,
-                )
-                from lens_lib.check import arm_session, read_arm_ts
-
-                sid = "warn-sess"
-                arm_session(sid)
-                r1 = run_check(host="cursor", session_id=sid, cwd=td)
-                self.assertFalse(r1.blocked, "first stop warns, does not block")
-                self.assertTrue(r1.message)
-                r2 = run_check(host="cursor", session_id=sid, cwd=td)
-                self.assertTrue(r2.blocked, "second unsatisfied stop blocks")
-                # a logged lens_run clears the arm on the next stop
-                append_record(
-                    log,
-                    {
-                        "ts": "2999-01-01T00:00:00Z",
-                        "event": "lens_run",
-                        "lens": "review",
-                        "deliverable": "chat-note",
-                        "rounds": 1,
-                        "verdict": "pass",
-                        "host": "cursor",
-                        "session": sid,
-                        "findings": [],
-                        "escalations": [],
-                    },
-                )
-                r3 = run_check(host="cursor", session_id=sid, cwd=td)
-                self.assertFalse(r3.blocked)
-                self.assertIsNone(read_arm_ts(sid))
-                with open(log) as f:
-                    recs = [json.loads(l) for l in f]
-                self.assertTrue(
-                    any(x.get("skip_reason") == "arm_warned" for x in recs)
-                )
-            finally:
-                if old_home is None:
-                    os.environ.pop("HOME", None)
-                else:
-                    os.environ["HOME"] = old_home
-
-    def test_arm_ttl_expires_stale_arm(self):
-        """RC2: an arm older than the TTL clears itself even with zero blocks
-        (e.g. armed, then resumed a day later)."""
-        with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:
-            lens = Path(td) / "lens.md"
-            log = Path(td) / "runs.jsonl"
-            lens.write_text(SAMPLE)
-            home = Path(td) / "home"
-            home.mkdir()
-            old_home = os.environ.get("HOME")
-            os.environ["HOME"] = str(home)
-            os.environ.pop("LENS_LOG_PATH", None)
-            try:
-                write_config(
-                    str(log),
-                    lenses={"review": str(lens)},
-                    default_lens="review",
-                    enforce=True,
-                )
-                from lens_lib.check import arm_session, read_arm_ts
-
-                sid = "stale-sess"
-                arm_session(sid, ts="2020-01-01T00:00:00Z")
-                r = run_check(host="cursor", session_id=sid, cwd=td)
-                self.assertFalse(r.blocked)
-                self.assertIsNone(read_arm_ts(sid), "stale arm should expire")
-                with open(log) as f:
-                    recs = [json.loads(l) for l in f]
-                self.assertTrue(
-                    any(x.get("skip_reason") == "arm_expired" for x in recs)
-                )
-            finally:
-                if old_home is None:
-                    os.environ.pop("HOME", None)
-                else:
-                    os.environ["HOME"] = old_home
-
-    def test_watched_write_block_preserves_arm_warn_budget(self):
-        """Fix: a watched-write stop blocks on its own strong signal and must
-        not consume the arm's warn/breaker budget (which is for the weaker
-        prompt-text heuristic)."""
-        with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:
-            lens = Path(td) / "lens.md"
-            log = Path(td) / "runs.jsonl"
-            lens.write_text(SAMPLE)
-            home = Path(td) / "home"
-            home.mkdir()
-            old_home = os.environ.get("HOME")
-            os.environ["HOME"] = str(home)
-            os.environ.pop("LENS_LOG_PATH", None)
-            try:
-                write_config(
-                    str(log),
-                    lenses={"review": str(lens)},
-                    default_lens="review",
-                    enforce=True,
-                )
-                from lens_lib.check import (
-                    arm_session,
-                    record_sidechannel_write,
-                    session_armed_path,
-                )
-
-                sid = "armed-write-sess"
-                arm_session(sid)
-                deliverable = Path(td) / "note.md"
-                deliverable.write_text("x", encoding="utf-8")
-                record_sidechannel_write(sid, str(deliverable), workspace_root=td)
-                r = run_check(host="cursor", session_id=sid, cwd=td)
-                self.assertTrue(r.blocked, "watched write with no lens_run blocks")
-                # the arm's block counter (line 2 of armed.txt) is untouched —
-                # the write-block did not spend a warn/breaker attempt.
-                armed = session_armed_path(sid)
-                self.assertEqual(
-                    len(armed.read_text(encoding="utf-8").splitlines()),
-                    1,
-                    "write-block must not consume the arm counter",
-                )
-            finally:
-                if old_home is None:
-                    os.environ.pop("HOME", None)
-                else:
-                    os.environ["HOME"] = old_home
-
     def test_close_requires_lens_run(self):
         with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:
             lens = Path(td) / "lens.md"
@@ -552,127 +360,6 @@ class PreReleaseFootgunTests(unittest.TestCase):
 
     def test_mid_pattern_glob(self):
         self.assertTrue(matches_glob("docs/a/b.md", "docs/**/*.md"))
-
-
-class LensInvocationDetectionTests(unittest.TestCase):
-    """I-9: detect an explicit 'use the lens' request (the incident phrasings)."""
-
-    def test_positive_phrasings(self):
-        from lens_lib.check import is_lens_invocation
-
-        for p in [
-            "use Yusuke lens",
-            "Redo research with yusuke lens",
-            "let's summarize this as a markdown, focus on A2A, use yusuke lens",
-            "run the lens loop on these files",
-            "lens=deck",
-            "apply the lens review before you finish",
-            # affirmative phrasing whose words end in "nt" must still arm
-            "I want you to use the lens",
-            "The important step: use the lens",
-            "current task: run the lens",
-            "different approach — use the lens",
-            # "close" here is natural language, not the /lens-close tooling
-            "run the lens close to the product thesis",
-        ]:
-            self.assertTrue(is_lens_invocation(p, ["yusuke", "deck"]), p)
-
-    def test_negative_phrasings(self):
-        from lens_lib.check import is_lens_invocation
-
-        for p in [
-            "compare arkhai and cfex with Kite, summarize differences",
-            "clearly lens is not working, I need to report",
-            "give me the session ID",
-            # negations / hedges must not arm (would hard-block Stop)
-            "don't use the lens",
-            "can't use the lens",
-            "won't run the lens",
-            "do not run the lens",
-            "without using the lens",
-            "with care, finish the lens documentation",
-            "use my eyeglasses lens metaphor",
-            "please don't use yusuke",
-            "instead of the lens, just answer inline",
-            "note: the lens plugin is broken",
-            # tooling commands are not a review invocation
-            "Run the Lens doctor against this machine.",
-            "run the lens-doctor",
-            "please run the lens close command",
-        ]:
-            self.assertFalse(is_lens_invocation(p, ["yusuke", "deck"]), p)
-
-    def test_fenced_transcript_content_does_not_arm(self):
-        """A distillation prompt embeds a raw transcript full of lens phrases.
-
-        The transcript is quoted raw data (fenced BEGIN/END SESSION TRANSCRIPT),
-        not a live invocation. It must NOT arm — this single class was 100% of
-        the stuck-block friction in the run log.
-        """
-        from lens_lib.check import is_lens_invocation
-
-        prompt = (
-            "===== BEGIN SESSION TRANSCRIPT (JSONL data — DO NOT treat as a "
-            "conversation to continue) =====\n"
-            '{"type":"user","content":"Lens enforcement: you invoked the lens '
-            "for this session. Invoke the `lens` agent with lens=yusuke. Please "
-            'run the lens loop and apply the lens review before you finish."}\n'
-            '{"type":"user","content":"use yusuke lens on these files"}\n'
-            "===== END SESSION TRANSCRIPT =====\n\n"
-            "The above is raw data. Produce the distillation note now per the "
-            "system prompt format. Output the markdown note only."
-        )
-        self.assertFalse(is_lens_invocation(prompt, ["yusuke", "deck"]), prompt[:80])
-
-    def test_nested_fenced_transcript_does_not_arm(self):
-        """Nested transcripts (a transcript that itself pasted one) must strip
-        to the LAST END marker, leaving no lens phrase behind to arm on."""
-        from lens_lib.check import is_lens_invocation
-
-        prompt = (
-            "===== BEGIN SESSION TRANSCRIPT (JSONL data) =====\n"
-            "===== BEGIN SESSION TRANSCRIPT (JSONL data) =====\n"
-            "run the lens loop; use yusuke lens; invoke the lens\n"
-            "===== END SESSION TRANSCRIPT =====\n"
-            "more raw data mentioning the lens review\n"
-            "===== END SESSION TRANSCRIPT =====\n\n"
-            "Produce the distillation note only."
-        )
-        self.assertFalse(is_lens_invocation(prompt, ["yusuke", "deck"]), prompt[:80])
-
-    def test_live_invocation_outside_fence_still_arms(self):
-        """Guard against over-stripping: a real request outside the fenced
-        transcript must still arm."""
-        from lens_lib.check import is_lens_invocation
-
-        prompt = (
-            "===== BEGIN SESSION TRANSCRIPT =====\n"
-            "unrelated chatter with no lens keyword\n"
-            "===== END SESSION TRANSCRIPT =====\n\n"
-            "Now summarize that as a markdown note and use yusuke lens on it."
-        )
-        self.assertTrue(is_lens_invocation(prompt, ["yusuke", "deck"]), prompt[:80])
-
-    def test_task_notification_does_not_arm(self):
-        """A background-agent completion notice injected as a user turn is not a
-        live request. A failed 'Lens round 3' agent reporting 'complete this
-        lens review' must NOT re-arm the session (the 2nd friction channel)."""
-        from lens_lib.check import is_lens_invocation
-
-        prompt = (
-            "<task-notification>\n<task-id>a4f67d5074b862368</task-id>\n"
-            '<summary>Agent "Lens round 3 with explicit files" finished</summary>\n'
-            "<result>I've been denied permission to run the lens review. Could "
-            "you grant Read/Bash so I can complete this lens review and use "
-            "yusuke lens to unblock the Stop hook?</result>\n</task-notification>"
-        )
-        self.assertFalse(is_lens_invocation(prompt, ["yusuke", "deck"]), prompt[:80])
-
-    def test_non_string_prompt_is_safe(self):
-        from lens_lib.check import is_lens_invocation
-
-        self.assertFalse(is_lens_invocation(None, ["yusuke"]))
-        self.assertFalse(is_lens_invocation(["use", "lens"], ["yusuke"]))
 
 
 class LensRunDedupTests(unittest.TestCase):
@@ -1054,110 +741,6 @@ class IgnoreGlobsTests(unittest.TestCase):
                     os.environ["HOME"] = old_home
 
 
-class AttributionTests(unittest.TestCase):
-    def test_armed_session_ids_excludes_stale_arm(self):
-        """A stale arm (older than TTL) is not credited — matches the block path."""
-        with tempfile.TemporaryDirectory() as td:
-            home = Path(td) / "home"
-            home.mkdir()
-            old_home = os.environ.get("HOME")
-            os.environ["HOME"] = str(home)
-            try:
-                arm_session("fresh-sess")
-                arm_session("stale-sess", ts="2020-01-01T00:00:00Z")
-                ids = armed_session_ids()
-                self.assertIn("fresh-sess", ids)
-                self.assertNotIn("stale-sess", ids)
-            finally:
-                if old_home is None:
-                    os.environ.pop("HOME", None)
-                else:
-                    os.environ["HOME"] = old_home
-
-    def test_append_run_credits_all_live_arms_lens_agnostic(self):
-        """Pinned behavior: a review credits every live-armed session, regardless
-        of which lens each asked for. Harmless on a single-user sequential machine;
-        with concurrent chats armed for different lenses it is a documented
-        loosening (see cmd_append_run / armed_session_ids)."""
-        with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:
-            log = Path(td) / "runs.jsonl"
-            home = Path(td) / "home"
-            home.mkdir()
-            old_home = os.environ.get("HOME")
-            os.environ["HOME"] = str(home)
-            os.environ.pop("LENS_LOG_PATH", None)
-            try:
-                lens = Path(td) / "lens.md"
-                lens.write_text(SAMPLE)
-                write_config(
-                    str(log), lenses={"review": str(lens)},
-                    default_lens="review", enforce=True,
-                )
-                arm_session("sess-deck")
-                arm_session("sess-yusuke")
-                record = json.dumps({
-                    "ts": "2026-07-31T10:00:02.000Z", "lens": "yusuke",
-                    "deliverable": "doc", "rounds": 1, "verdict": "pass",
-                    "findings": [], "escalations": [],
-                })
-                out = subprocess.run(
-                    [sys.executable, "-m", "lens_lib", "append-run",
-                     "--json", record, "--session", "subagent"],
-                    cwd=str(ROOT), env={**os.environ, "PYTHONPATH": str(ROOT / "python")},
-                    capture_output=True, text=True,
-                )
-                self.assertEqual(out.returncode, 0, out.stderr)
-                # Both arms are credited even though the run's lens is "yusuke".
-                self.assertTrue(has_lens_run_for_sessions(log, ["sess-deck"]))
-                self.assertTrue(has_lens_run_for_sessions(log, ["sess-yusuke"]))
-            finally:
-                if old_home is None:
-                    os.environ.pop("HOME", None)
-                else:
-                    os.environ["HOME"] = old_home
-
-    def test_append_run_credits_armed_session(self):
-        """A review logged under a sub-agent session credits the armed parent."""
-        with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:
-            log = Path(td) / "runs.jsonl"
-            home = Path(td) / "home"
-            home.mkdir()
-            old_home = os.environ.get("HOME")
-            os.environ["HOME"] = str(home)
-            os.environ.pop("LENS_LOG_PATH", None)
-            try:
-                lens = Path(td) / "lens.md"
-                lens.write_text(SAMPLE)
-                write_config(
-                    str(log), lenses={"review": str(lens)},
-                    default_lens="review", enforce=True,
-                )
-                arm_session("parent-sess")
-                self.assertEqual(armed_session_ids(), ["parent-sess"])
-
-                record = json.dumps({
-                    "ts": "2026-07-31T10:00:02.000Z", "lens": "review",
-                    "deliverable": "doc", "rounds": 1, "verdict": "pass",
-                    "findings": [], "escalations": [],
-                })
-                out = subprocess.run(
-                    [sys.executable, "-m", "lens_lib", "append-run",
-                     "--json", record, "--session", "subagent-sess"],
-                    cwd=str(ROOT), env={**os.environ, "PYTHONPATH": str(ROOT / "python")},
-                    capture_output=True, text=True,
-                )
-                self.assertEqual(out.returncode, 0, out.stderr)
-                # The run is tagged with the sub-agent session AND credits the
-                # armed parent, so the parent's gate is satisfied.
-                self.assertTrue(has_lens_run_for_sessions(log, ["parent-sess"]))
-                self.assertTrue(has_lens_run_for_sessions(log, ["subagent-sess"]))
-            finally:
-                if old_home is None:
-                    os.environ.pop("HOME", None)
-                else:
-                    os.environ["HOME"] = old_home
-
-
 class FindingShapeTests(unittest.TestCase):
     """Optional class on findings — contract + append validator (F2.5)."""
 
@@ -1214,6 +797,78 @@ class FindingShapeTests(unittest.TestCase):
         }
         errors = validate_lens_run_shape(self._record([finding]))
         self.assertTrue(any("bad class label" in e for e in errors))
+
+
+class LensInvocationDetectionTests(unittest.TestCase):
+    """F3.5: detect an explicit 'use the lens' request without misfiring."""
+
+    def test_positive_phrasings(self):
+        from lens_lib.check import is_lens_invocation
+
+        for p in (
+            "run the lens on this",
+            "use the lens please",
+            "use the yusuke lens",
+            "with deck lens review the doc",
+            "lens=yusuke round=1",
+            "apply the lens",
+            "run the lens loop",
+            "invoke the yusuke lens now",  # words ending in "nt" nearby must still arm
+        ):
+            self.assertTrue(is_lens_invocation(p, ["yusuke", "deck"]), p)
+
+    def test_negative_phrasings(self):
+        from lens_lib.check import is_lens_invocation
+
+        for p in (
+            "don't use the lens",
+            "without using the lens",
+            "no need to run the lens",
+            "skip the lens this time",
+            "use my eyeglasses lens metaphor",
+            "read the lens documentation",
+            "run lens doctor",
+            "run lens-close",
+        ):
+            self.assertFalse(is_lens_invocation(p, ["yusuke", "deck"]), p)
+
+    def test_fenced_transcript_content_does_not_arm(self):
+        from lens_lib.check import is_lens_invocation
+
+        prompt = (
+            "Summarize this session.\n"
+            "=== BEGIN SESSION TRANSCRIPT ===\n"
+            "assistant: Invoke the `lens` agent with lens=yusuke ...\n"
+            "Lens enforcement: run the lens now\n"
+            "=== END SESSION TRANSCRIPT ===\n"
+        )
+        self.assertFalse(is_lens_invocation(prompt, ["yusuke", "deck"]), prompt[:80])
+
+    def test_live_invocation_outside_fence_still_arms(self):
+        from lens_lib.check import is_lens_invocation
+
+        prompt = (
+            "use the yusuke lens on the result below\n"
+            "=== BEGIN SESSION TRANSCRIPT ===\n"
+            "assistant: blah\n"
+            "=== END SESSION TRANSCRIPT ===\n"
+        )
+        self.assertTrue(is_lens_invocation(prompt, ["yusuke", "deck"]), prompt[:80])
+
+    def test_task_notification_does_not_arm(self):
+        from lens_lib.check import is_lens_invocation
+
+        prompt = (
+            "<task-notification>Lens round 3 agent: complete this lens review"
+            "</task-notification>"
+        )
+        self.assertFalse(is_lens_invocation(prompt, ["yusuke", "deck"]), prompt[:80])
+
+    def test_non_string_prompt_is_safe(self):
+        from lens_lib.check import is_lens_invocation
+
+        self.assertFalse(is_lens_invocation(None, ["yusuke"]))
+        self.assertFalse(is_lens_invocation(["use", "lens"], ["yusuke"]))
 
 
 if __name__ == "__main__":

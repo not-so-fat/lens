@@ -108,11 +108,13 @@ class DoctorTests(unittest.TestCase):
 class HookWiringTests(unittest.TestCase):
     """Doctor must catch an unwired hook script, not just a missing file."""
 
-    def test_missing_userpromptsubmit_command_fails(self):
+    def test_missing_required_command_fails(self):
         from lens_lib.doctor import _validate_hook_commands
 
         with tempfile.TemporaryDirectory(dir=str(ROOT)) as td_s:
             hooks = Path(td_s) / "claude-hooks.json"
+            # A hooks file whose Stop is wired to some unrelated command must be
+            # flagged for not wiring the required claude_stop.py script.
             hooks.write_text(
                 json.dumps(
                     {
@@ -122,7 +124,7 @@ class HookWiringTests(unittest.TestCase):
                                     "hooks": [
                                         {
                                             "type": "command",
-                                            "command": 'python3 "${CLAUDE_PLUGIN_ROOT}/python/claude_stop.py"',
+                                            "command": "echo unrelated",
                                         }
                                     ]
                                 }
@@ -138,11 +140,10 @@ class HookWiringTests(unittest.TestCase):
                 required_var="CLAUDE_PLUGIN_ROOT",
                 required_scripts=[
                     "python/claude_stop.py",
-                    "python/claude_user_prompt.py",
                 ],
             )
             self.assertFalse(ok, detail)
-            self.assertIn("claude_user_prompt.py", detail)
+            self.assertIn("claude_stop.py", detail)
 
     def test_shipped_claude_hooks_fully_wired(self):
         from lens_lib.doctor import _validate_hook_commands

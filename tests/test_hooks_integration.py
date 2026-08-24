@@ -74,6 +74,15 @@ def _run_hook(script: Path, payload: dict, env: dict, cwd: Optional[Path] = None
     return proc
 
 
+def _claude_block(proc):
+    """(blocked, reason) for a Claude Stop hook that blocks via decision:block."""
+    try:
+        out = json.loads(proc.stdout or "{}")
+    except json.JSONDecodeError:
+        out = {}
+    return out.get("decision") == "block", out.get("reason", "")
+
+
 class HookIntegrationTests(unittest.TestCase):
     def setUp(self):
         self._td = tempfile.TemporaryDirectory(dir=str(ROOT))
@@ -141,8 +150,10 @@ class HookIntegrationTests(unittest.TestCase):
             },
             self.env,
         )
-        self.assertEqual(proc.returncode, 2, proc.stderr)
-        self.assertIn("Invoke the `lens` agent", proc.stderr)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        blocked, reason = _claude_block(proc)
+        self.assertTrue(blocked, proc.stdout)
+        self.assertIn("Invoke the `lens` agent", reason)
         # hook_check appended
         lines = self.log.read_text(encoding="utf-8").strip().splitlines()
         self.assertTrue(lines)
@@ -152,6 +163,59 @@ class HookIntegrationTests(unittest.TestCase):
         self.assertTrue(rec["blocked"])
         self.assertTrue(rec["watched_writes"])
         self.assertFalse(rec["lens_run_found"])
+
+    def test_claude_stop_loop_persists_across_stops(self):
+        """The loop does not self-give-up: repeated stops keep blocking until satisfied."""
+        transcript = self._transcript_with_write()
+        for _ in range(5):
+            proc = _run_hook(
+                CLAUDE_STOP,
+                {
+                    "transcript_path": str(transcript),
+                    "session_id": "sess-1",
+                    "cwd": str(self.td),
+                },
+                self.env,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertTrue(_claude_block(proc)[0], proc.stdout)
+        rec = json.loads(self.log.read_text(encoding="utf-8").strip().splitlines()[-1])
+        self.assertTrue(rec["blocked"])
+        self.assertFalse(rec.get("declined"))
+
+    def test_claude_stop_lens_skip_clears_loop(self):
+        """Second exit: a session-tagged lens_skip lets the turn end (owner held)."""
+        transcript = self._transcript_with_write()
+        blocked = _run_hook(
+            CLAUDE_STOP,
+            {"transcript_path": str(transcript), "session_id": "sess-1", "cwd": str(self.td)},
+            self.env,
+        )
+        self.assertEqual(blocked.returncode, 0, blocked.stderr)
+        self.assertTrue(_claude_block(blocked)[0], blocked.stdout)
+        with self.log.open("a", encoding="utf-8") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "ts": utc_now_iso(),
+                        "event": "lens_skip",
+                        "deliverable": "out",
+                        "session": "sess-1",
+                    }
+                )
+                + "\n"
+            )
+        proc = _run_hook(
+            CLAUDE_STOP,
+            {"transcript_path": str(transcript), "session_id": "sess-1", "cwd": str(self.td)},
+            self.env,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        rec = json.loads(self.log.read_text(encoding="utf-8").strip().splitlines()[-1])
+        self.assertFalse(rec["blocked"])
+        self.assertTrue(rec["declined"])
+        self.assertEqual(rec.get("gate"), "declined")
+        self.assertEqual(rec.get("skip_reason"), "declined")
 
     def test_claude_stop_passes_with_lens_run(self):
         transcript = self._transcript_with_write()
@@ -237,7 +301,8 @@ class HookIntegrationTests(unittest.TestCase):
             },
             self.env,
         )
-        self.assertEqual(proc.returncode, 2, proc.stderr)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(_claude_block(proc)[0], proc.stdout)
         rec = json.loads(self.log.read_text(encoding="utf-8").strip().splitlines()[-1])
         self.assertTrue(rec["blocked"])
         self.assertEqual(rec.get("gate"), "none")
@@ -292,37 +357,22 @@ class HookIntegrationTests(unittest.TestCase):
         )
         return t
 
-    def test_claude_explicit_invocation_arms_and_blocks_without_writes(self):
-        """I-9: 'use <lens>' on a chat turn (no watched write) must still enforce a lens_run.
-
-        Warn-first: first unsatisfied stop warns (exit 0, arm_warned); a later
-        stop blocks (exit 2) until a same-session lens_run lands.
-        """
+    def test_claude_arm_blocks_without_writes_then_lens_run_clears(self):
+        """F3.5: 'use <lens>' on a chat turn (no watched write) still enforces a lens_run."""
         prompt = _run_hook(
             CLAUDE_PROMPT,
-            {"prompt": "run the lens on this", "session_id": "sess-1", "cwd": str(self.td)},
+            {"prompt": "run the lens on this", "session_id": "sess-arm", "cwd": str(self.td)},
             self.env,
         )
         self.assertEqual(prompt.returncode, 0, prompt.stderr)
-        transcript = self._transcript_no_write()
-        warn = _run_hook(
-            CLAUDE_STOP,
-            {"transcript_path": str(transcript), "session_id": "sess-1", "cwd": str(self.td)},
-            self.env,
-        )
-        self.assertEqual(warn.returncode, 0, warn.stderr)  # warn-first, no block yet
-        self.assertIn("lens_run", warn.stderr)
-        rec_w = json.loads(self.log.read_text(encoding="utf-8").strip().splitlines()[-1])
-        self.assertTrue(rec_w["armed"])
-        self.assertFalse(rec_w["blocked"])
-        self.assertEqual(rec_w.get("skip_reason"), "arm_warned")
-        self.assertFalse(rec_w["wrote_watched"])
+        transcript = self._transcript_no_write(sid="sess-arm")
         stop = _run_hook(
             CLAUDE_STOP,
-            {"transcript_path": str(transcript), "session_id": "sess-1", "cwd": str(self.td)},
+            {"transcript_path": str(transcript), "session_id": "sess-arm", "cwd": str(self.td)},
             self.env,
         )
-        self.assertEqual(stop.returncode, 2, stop.stderr)  # second stop blocks
+        self.assertEqual(stop.returncode, 0, stop.stderr)
+        self.assertTrue(_claude_block(stop)[0], stop.stdout)  # armed, blocks with no writes
         rec = json.loads(self.log.read_text(encoding="utf-8").strip().splitlines()[-1])
         self.assertTrue(rec["armed"])
         self.assertTrue(rec["blocked"])
@@ -338,7 +388,7 @@ class HookIntegrationTests(unittest.TestCase):
                         "rounds": 1,
                         "verdict": "pass",
                         "host": "claude-code",
-                        "session": "sess-1",
+                        "session": "sess-arm",
                         "findings": [],
                         "escalations": [],
                     }
@@ -347,54 +397,71 @@ class HookIntegrationTests(unittest.TestCase):
             )
         stop2 = _run_hook(
             CLAUDE_STOP,
-            {"transcript_path": str(transcript), "session_id": "sess-1", "cwd": str(self.td)},
+            {"transcript_path": str(transcript), "session_id": "sess-arm", "cwd": str(self.td)},
             self.env,
         )
         self.assertEqual(stop2.returncode, 0, stop2.stderr)
-        # The arm is consumed: a later chat turn is not re-blocked and records armed=false.
+        self.assertFalse(_claude_block(stop2)[0], stop2.stdout)  # satisfied, not blocked
+        # The arm is consumed on satisfaction; a later stop records armed=false.
         stop3 = _run_hook(
             CLAUDE_STOP,
-            {"transcript_path": str(transcript), "session_id": "sess-1", "cwd": str(self.td)},
+            {"transcript_path": str(transcript), "session_id": "sess-arm", "cwd": str(self.td)},
             self.env,
         )
-        self.assertEqual(stop3.returncode, 0, stop3.stderr)
+        self.assertFalse(_claude_block(stop3)[0], stop3.stdout)
         rec3 = json.loads(self.log.read_text(encoding="utf-8").strip().splitlines()[-1])
-        self.assertFalse(rec3["armed"])
-        self.assertFalse(rec3["blocked"])
+        self.assertFalse(rec3["armed"])  # arm consumed
 
-    def test_claude_armed_with_enforce_false_warns_not_blocks(self):
-        """enforce=false must not block an armed session, but still records armed=true."""
-        _write_config(self.home, self.lens, self.log, enforce=False)
+    def test_claude_arm_cleared_by_lens_skip(self):
+        """Second exit works for arming too: a lens_skip clears an armed session."""
         _run_hook(
             CLAUDE_PROMPT,
-            {"prompt": "run the lens on this", "session_id": "sess-e", "cwd": str(self.td)},
+            {"prompt": "use the review lens", "session_id": "sess-armskip", "cwd": str(self.td)},
             self.env,
         )
-        transcript = self._transcript_no_write("chat_e.jsonl", "sess-e")
+        transcript = self._transcript_no_write("chat_s.jsonl", "sess-armskip")
         stop = _run_hook(
             CLAUDE_STOP,
-            {"transcript_path": str(transcript), "session_id": "sess-e", "cwd": str(self.td)},
+            {"transcript_path": str(transcript), "session_id": "sess-armskip", "cwd": str(self.td)},
             self.env,
         )
-        self.assertEqual(stop.returncode, 0, stop.stderr)  # not blocked (enforce=false)
+        self.assertTrue(_claude_block(stop)[0], stop.stdout)
+        with self.log.open("a", encoding="utf-8") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "ts": utc_now_iso(),
+                        "event": "lens_skip",
+                        "deliverable": "chat-answer",
+                        "session": "sess-armskip",
+                    }
+                )
+                + "\n"
+            )
+        stop2 = _run_hook(
+            CLAUDE_STOP,
+            {"transcript_path": str(transcript), "session_id": "sess-armskip", "cwd": str(self.td)},
+            self.env,
+        )
+        self.assertFalse(_claude_block(stop2)[0], stop2.stdout)
         rec = json.loads(self.log.read_text(encoding="utf-8").strip().splitlines()[-1])
-        self.assertTrue(rec["armed"])
-        self.assertFalse(rec["blocked"])
+        self.assertTrue(rec["declined"])
 
     def test_claude_non_lens_prompt_does_not_arm(self):
         """A normal prompt must not arm — no false blocks on chat turns."""
         _run_hook(
             CLAUDE_PROMPT,
-            {"prompt": "compare two companies and summarize", "session_id": "sess-2", "cwd": str(self.td)},
+            {"prompt": "compare two companies and summarize", "session_id": "sess-plain", "cwd": str(self.td)},
             self.env,
         )
-        transcript = self._transcript_no_write("chat2.jsonl", "sess-2")
+        transcript = self._transcript_no_write("chat2.jsonl", "sess-plain")
         stop = _run_hook(
             CLAUDE_STOP,
-            {"transcript_path": str(transcript), "session_id": "sess-2", "cwd": str(self.td)},
+            {"transcript_path": str(transcript), "session_id": "sess-plain", "cwd": str(self.td)},
             self.env,
         )
         self.assertEqual(stop.returncode, 0, stop.stderr)
+        self.assertFalse(_claude_block(stop)[0], stop.stdout)
         rec = json.loads(self.log.read_text(encoding="utf-8").strip().splitlines()[-1])
         self.assertFalse(rec["armed"])
         self.assertFalse(rec["blocked"])
@@ -700,59 +767,41 @@ class HookIntegrationTests(unittest.TestCase):
         claude_cmd = json.dumps(claude_hooks)
         self.assertIn("${CLAUDE_PLUGIN_ROOT}", claude_cmd)
 
-    def test_cursor_last_followup_includes_unlock_hint(self):
+    def test_cursor_lens_skip_clears_followup(self):
+        """Second exit works on Cursor too: a lens_skip stops the followup."""
         _run_hook(
             CURSOR_EDIT,
             {
                 "file_path": str(self.deliverable),
-                "session_id": "conv-limit",
+                "session_id": "conv-skip",
                 "workspace_roots": [str(self.td)],
             },
             self.env,
         )
+        with self.log.open("a", encoding="utf-8") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "ts": utc_now_iso(),
+                        "event": "lens_skip",
+                        "deliverable": "out",
+                        "session": "conv-skip",
+                    }
+                )
+                + "\n"
+            )
         stop = _run_hook(
             CURSOR_STOP,
             {
                 "status": "completed",
-                "session_id": "conv-limit",
+                "session_id": "conv-skip",
                 "workspace_roots": [str(self.td)],
-                "loop_count": 4,
-                "loop_limit": 5,
-            },
-            self.env,
-        )
-        out = json.loads(stop.stdout)
-        self.assertIn("followup_message", out)
-        self.assertIn("LAST FORCED FOLLOW-UP", out["followup_message"])
-        self.assertIn("enforce", out["followup_message"])
-
-    def test_cursor_loop_limit_exhausted_no_followup(self):
-        _run_hook(
-            CURSOR_EDIT,
-            {
-                "file_path": str(self.deliverable),
-                "session_id": "conv-exhausted",
-                "workspace_roots": [str(self.td)],
-            },
-            self.env,
-        )
-        stop = _run_hook(
-            CURSOR_STOP,
-            {
-                "status": "completed",
-                "session_id": "conv-exhausted",
-                "workspace_roots": [str(self.td)],
-                "loop_count": 5,
-                "loop_limit": 5,
+                "loop_count": 0,
             },
             self.env,
         )
         out = json.loads(stop.stdout)
         self.assertNotIn("followup_message", out)
-        self.assertIn("loop_limit", stop.stderr)
-        lines = self.log.read_text(encoding="utf-8").strip().splitlines()
-        events = [json.loads(ln)["event"] for ln in lines]
-        self.assertIn("hook_limit_exhausted", events)
 
 
 class CursorSessionIdMismatchTests(unittest.TestCase):

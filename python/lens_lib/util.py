@@ -69,7 +69,7 @@ def session_writes_path(session: str) -> Path:
 
 
 def session_armed_path(session: str) -> Path:
-    """Explicit-invocation arm marker keyed by session id (I-9)."""
+    """Explicit-invocation arm marker keyed by session id (F3.5)."""
     return sessions_root() / _safe_session(session) / "armed.txt"
 
 
@@ -112,6 +112,13 @@ INVOCATION_TEMPLATE = (
     "round=<n>, deliverable=\"<stable key>\", files=[...], sources=[...], "
     "and on rounds after the first: prior_findings + your reaction per finding. "
     "Reuse the same deliverable key every round."
+)
+
+SKIP_TEMPLATE = (
+    "run `PYTHONPATH=<plugin-root>/python python3 -m lens_lib skip "
+    "\"<deliverable>\" --session <the session id shown above> "
+    "[--reason \"<why held>\"]` — only when the owner explicitly said to hold; "
+    "it logs a lens_skip and clears the loop for that deliverable."
 )
 
 CURSOR_UNLOCK_HINT = (

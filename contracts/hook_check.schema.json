@@ -31,16 +31,16 @@
       "type": "boolean",
       "description": "session had any watched-path writes (ignores after_ts); used for M3 success metric"
     },
-    "armed": {
-      "type": "boolean",
-      "description": "session was armed by an explicit lens invocation (Claude Code UserPromptSubmit; Cursor arming is a follow-up, I-9); blocks until a lens_run regardless of writes"
-    },
     "lens_run_found": { "type": "boolean" },
+    "declined": {
+      "type": "boolean",
+      "description": "a lens_skip cleared the loop for this session (the owner deliberately held) — the loop's second exit"
+    },
     "blocked": { "type": "boolean" },
     "enforce": { "type": "boolean" },
     "gate": {
-      "enum": ["none", "time", "session"],
-      "description": "which gate satisfied lens_run_found; none if unsatisfied or no watched writes"
+      "enum": ["none", "time", "session", "declined"],
+      "description": "what satisfied the gate: session = a lens_run; declined = a lens_skip; none = unsatisfied or no watched writes"
     },
     "excluded_writes": {
       "type": "integer",
@@ -49,7 +49,7 @@
     },
     "skip_reason": {
       "type": "string",
-      "description": "why enforcement did not block despite activity (enforce_false, no_watch_match, excluded_only, arm_warned, arm_expired, arm_abandoned). arm_warned = first unsatisfied stop after an arm (warn-first, no block yet); arm_expired/arm_abandoned = an unsatisfied arm auto-cleared by the TTL/circuit-breaker guards"
+      "description": "why enforcement did not block despite activity: declined (a lens_skip cleared it), enforce_false, no_watch_match, excluded_only"
     },
     "duration_ms": { "type": "number", "minimum": 0 },
     "host": {
