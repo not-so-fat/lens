@@ -110,6 +110,7 @@ INVOCATION_TEMPLATE = (
     "Invoke the `lens` agent with: "
     "lens=<configured name, or omit for default_lens>, "
     "round=<n>, deliverable=\"<stable key>\", files=[...], sources=[...], "
+    "hold_policy=wait-for-go|auto-apply (omit = auto-apply), "
     "and on rounds after the first: prior_findings + your reaction per finding. "
     "Reuse the same deliverable key every round."
 )
