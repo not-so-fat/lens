@@ -154,6 +154,7 @@ class HookIntegrationTests(unittest.TestCase):
         blocked, reason = _claude_block(proc)
         self.assertTrue(blocked, proc.stdout)
         self.assertIn("Invoke the `lens` agent", reason)
+        self.assertIn("hold_policy", reason)
         # hook_check appended
         lines = self.log.read_text(encoding="utf-8").strip().splitlines()
         self.assertTrue(lines)
@@ -539,6 +540,7 @@ class HookIntegrationTests(unittest.TestCase):
         out = json.loads(stop.stdout)
         self.assertIn("followup_message", out)
         self.assertIn("Invoke the `lens` agent", out["followup_message"])
+        self.assertIn("hold_policy", out["followup_message"])
         rec = json.loads(self.log.read_text(encoding="utf-8").strip().splitlines()[-1])
         self.assertEqual(rec["host"], "cursor")
         self.assertTrue(rec["blocked"])

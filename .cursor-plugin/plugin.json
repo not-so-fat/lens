@@ -1,16 +1,12 @@
 {
   "name": "lens",
   "version": "0.2.6",
-  "description": "Personal review standards for AI agents \u2014 runner, stop-hook enforcement, run log",
+  "description": "Personal review standards for AI agents — runner, stop-hook enforcement, run log",
   "author": {
     "name": "lens"
   },
   "repository": "https://github.com/not-so-fat/lens",
-  "keywords": [
-    "lens",
-    "review",
-    "enforcement"
-  ],
+  "keywords": ["lens", "review", "enforcement"],
   "agents": "./agents/cursor/",
   "commands": "./commands/",
   "hooks": "./hooks/cursor-hooks.json"

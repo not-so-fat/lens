@@ -4,7 +4,7 @@
     "name": "lens"
   },
   "metadata": {
-    "description": "Lens \u2014 personal review standards for AI agents",
+    "description": "Lens — personal review standards for AI agents",
     "version": "0.2.6"
   },
   "plugins": [

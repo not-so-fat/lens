@@ -1,6 +1,6 @@
 ---
 name: lens
-description: Buddy reviewer — executes a named lens against a deliverable before it is surfaced to the lens owner. Invoke with lens=<configured name>, round, deliverable key, files/sources, and — on rounds after the first — each prior finding plus the worker's reaction to it.
+description: Buddy reviewer — executes a named lens against a deliverable before it is surfaced to the lens owner. Invoke with lens=<configured name>, round, deliverable key, files/sources, optional hold_policy=wait-for-go|auto-apply, and — on rounds after the first — each prior finding plus the worker's reaction to it.
 readonly: true
 ---
 
@@ -47,7 +47,7 @@ Host for logging: `cursor`. You are `readonly` — do not edit deliverables. On 
 A round is **terminal** when the loop rests — nothing more happens without the owner or a later round:
 - **PASS** (no findings fired)
 - every finding is **ESCALATE** (no new FIX)
-- **FIX** findings and the worker is **holding for owner go** (wait-for-explicit-go: do not auto-apply; log and hand off)
+- **FIX** findings and `hold_policy=wait-for-go` (worker holds for owner go; log and hand off)
 
 Only on a terminal round, produce ONE `lens_run` record:
 
@@ -74,8 +74,9 @@ The worker must append it via the append launcher (a bare `python3 <path>`, cwd-
 - `"session"` must be this chat's conversation/session id (Cursor stop has no transcript window without it as a backup).
 - Prior rounds' findings and the worker's stated reaction to each come from the worker's prompt — include them all in `findings` with their round numbers and every logged field (`class` must round-trip).
 - This round's ESCALATE findings get `reaction: "escalated"`.
-- On FIX when the worker will auto-apply and return for round 2+, do NOT emit `LENS_LOG_APPEND` — the worker will return.
-- On FIX when the worker holds for owner go: log with `verdict: "held"`; this round's FIX findings get `reaction: "pending-owner"`.
+- On FIX: read `hold_policy` from the invocation (`wait-for-go` | `auto-apply`; **absent = auto-apply**).
+  - `auto-apply` (or absent): do NOT emit `LENS_LOG_APPEND` — the worker will return for round 2+.
+  - `wait-for-go`: log with `verdict: "held"`; this round's FIX findings get `reaction: "pending-owner"`.
 - Ask the worker to set `ts` from `date -u +%Y-%m-%dT%H:%M:%SZ` when appending — never estimate.
 - Always include `"host": "cursor"`.
 - Either `verdict: "pass"`, `"escalated"`, or `"held"` is a terminal `lens_run` and satisfies the stop-hook gate (`held` ≠ pass; analytics stay honest).
@@ -87,8 +88,8 @@ Return to the worker, in this order:
 <!-- SHARED:reply START -->
 1. Verdict: `PASS`, `FIX`, or `ESCALATE`.
 2. Each finding on one line: `SEVERITY check @ target — note` (name the class when `class` is set).
-3. If FIX and the worker will auto-apply: for findings with `class`, require a class-wide sweep (all comparable elements, not just the flagged instance). Worker returns with the same deliverable key, the next round number, reaction per finding (`fixed-class` when they swept the class), and **prior_findings including every logged field** (`class` must round-trip).
-4. If FIX and the worker holds for owner go: this round is terminal — log with `verdict: "held"` (see Logging); worker waits for owner "apply" or "hold" before round 2.
+3. If FIX and `hold_policy` is `auto-apply` or absent: for findings with `class`, require a class-wide sweep (all comparable elements, not just the flagged instance). Worker returns with the same deliverable key, the next round number, reaction per finding (`fixed-class` when they swept the class), and **prior_findings including every logged field** (`class` must round-trip).
+4. If FIX and `hold_policy=wait-for-go`: this round is terminal — log with `verdict: "held"` (see Logging); worker waits for owner "apply" or "hold" before round 2.
 <!-- SHARED:reply END -->
 
-4. If terminal: the `LENS_LOG_APPEND:` line.
+5. If terminal: the `LENS_LOG_APPEND:` line.

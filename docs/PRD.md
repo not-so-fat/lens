@@ -346,13 +346,17 @@ Input:
     "prior_findings": {
       "type": "array",
       "items": { "$ref": "lens_run.schema.json#/properties/findings/items" }
+    },
+    "hold_policy": {
+      "enum": ["wait-for-go", "auto-apply"],
+      "description": "on FIX: wait-for-go → terminal held log; auto-apply (default when absent) → do not log, worker returns for round 2+"
     }
   },
   "additionalProperties": false
 }
 ```
 
-Output: verdict `PASS | FIX | ESCALATE`; findings and escalations exactly as they will be logged (§7.1 shapes, including optional `class`). On FIX, the reply requires class-wide sweep when `class` is set; worker must round-trip `class` in `prior_findings`.
+Output: verdict `PASS | FIX | ESCALATE`; findings and escalations exactly as they will be logged (§7.1 shapes, including optional `class`). On FIX: `hold_policy: wait-for-go` → terminal `verdict: held` with `pending-owner` reactions; absent or `auto-apply` → do not log, worker returns (class-wide sweep when `class` is set; round-trip `class` in `prior_findings`).
 
 ### 7.4 `~/.lens/config.json`
 

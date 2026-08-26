@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "lens-plugins",
-  "description": "Lens \u2014 personal review standards for AI agents",
+  "description": "Lens — personal review standards for AI agents",
   "owner": {
     "name": "lens"
   },
@@ -12,11 +12,7 @@
       "description": "Personal review lens runner, Stop-hook enforcement, and run log for Claude Code",
       "version": "0.2.6",
       "category": "productivity",
-      "keywords": [
-        "lens",
-        "review",
-        "enforcement"
-      ]
+      "keywords": ["lens", "review", "enforcement"]
     }
   ]
 }

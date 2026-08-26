@@ -15,6 +15,10 @@
     "prior_findings": {
       "type": "array",
       "items": { "$ref": "lens_run.schema.json#/properties/findings/items" }
+    },
+    "hold_policy": {
+      "enum": ["wait-for-go", "auto-apply"],
+      "description": "on FIX: wait-for-go → terminal held log; auto-apply (default when absent) → do not log, worker returns for round 2+"
     }
   },
   "additionalProperties": false

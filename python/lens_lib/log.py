@@ -71,7 +71,7 @@ def has_lens_run_since(log_path: Path, since_iso: Optional[str]) -> bool:
 
     Fail closed when since_iso is None or unparseable — never treat an
     unbounded / broken window as satisfied by a historical run.
-    Both pass, escalated, and held terminal lens_run records satisfy the gate.
+    Any terminal verdict (pass, escalated, held) satisfies the gate.
     """
     since = parse_iso_ts(since_iso) if since_iso else None
     if since is None:
