@@ -123,7 +123,7 @@ Acceptance:
 
 **US-3 (plugin). Enforcement.** As a lens owner, I want a turn that wrote watched files blocked at its Stop-hook firing until a lens run is logged, so the loop cannot be silently skipped.
 Acceptance:
-- [ ] the Stop-hook firing blocks (Claude Code via `{"decision":"block","reason":…}`, not exit-2-as-error; message names the missing step) when the session has written files matching `watch_globs` (fnmatch against cwd-relative and absolute paths; never `~/.claude/` or system temp — §7.4) and the log has no same-session `lens_run` **and no `lens_skip`** with `ts` ≥ the transcript's first-event time; it keeps blocking on each stop (a true loop) until one lands
+- [ ] the Stop-hook firing blocks (Claude Code via `{"decision":"block","reason":…}`, not exit-2-as-error; message names the missing step) when the session has written files matching `watch_globs` (fnmatch against cwd-relative and absolute paths; never `~/.claude/`, `~/.codex/`, `$TMPDIR`, or classic `/tmp` / `/private/tmp` — §7.4) and the log has no same-session `lens_run` **and no `lens_skip`** with `ts` ≥ the transcript's first-event time; it keeps blocking on each stop (a true loop) until one lands
 - [ ] the firing passes when such a `lens_run` **or a `lens_skip`** exists, when no watched files were written, or when `enforce=false`
 - [ ] a same-session `lens_skip` (F4.4 — the owner deliberately held) clears the block exactly as a `lens_run` does (`gate=declined`); this is the loop's second exit, replacing the old circuit-breaker/warn-first/TTL machinery
 - [ ] (Claude Code) an explicit lens invocation in the prompt (`use <lens>`, `lens=<name>`, `run the lens`; negations do not count) **arms** the session, requiring a same-session `lens_run` or `lens_skip` **even with no watched writes** (§7.6 `armed`); it disarms once one lands. The detector ignores negations/hedges and lens phrasing quoted inside injected wrappers (transcript fences, `<task-notification>`) or lens *tooling* (`lens doctor`/`lens close`/`lens skip`). A false or abandoned arm is cleared by recording a `lens_skip` — no self-clearing breaker/TTL needed. Cursor arming is a follow-up (I-9)
@@ -391,7 +391,7 @@ Name resolution order for a lens name: (1) `lenses[name]` if present; (2) else `
       "type": "array",
       "items": { "type": "string" },
       "default": ["**/*.md", "**/*.html", "**/*.pptx"],
-      "description": "fnmatch patterns tested against each written file's path relative to the session working directory AND its absolute path; paths under ~/.claude/ and the system temp directory never match"
+      "description": "fnmatch patterns tested against each written file's path relative to the session working directory AND its absolute path; paths under ~/.claude/, ~/.codex/, the system temp directory ($TMPDIR), and classic /tmp / /private/tmp never match"
     }
   },
   "additionalProperties": false

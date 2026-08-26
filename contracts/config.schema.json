@@ -26,7 +26,7 @@
       "type": "array",
       "items": { "type": "string" },
       "default": ["**/*.md", "**/*.html", "**/*.pptx"],
-      "description": "fnmatch patterns tested against each written file's path relative to the session working directory AND its absolute path; paths under ~/.claude/ and the system temp directory never match"
+      "description": "fnmatch patterns tested against each written file's path relative to the session working directory AND its absolute path; paths under ~/.claude/, ~/.codex/, the system temp directory ($TMPDIR), and classic /tmp / /private/tmp never match"
     }
   },
   "additionalProperties": false
