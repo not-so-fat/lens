@@ -174,7 +174,7 @@ Deferred stories (deck card fetch, correction-capture automation): see §10.
 | F2.1 | Plugin ships runners as `agents/lens.md` (Claude Code) and `agents/cursor/lens.md` (Cursor), semantics identical to the proven v0 agent with hard-coded paths replaced by name→path resolution (F1.2) | US-2 acceptance |
 | F2.2 | Runner resolves lens **name** → file path (`lenses` map, else `lenses_dir/<name>.md`) at invocation time; that file is the single source of truth (input shape §7.5) | editing the lens file changes the next run's checks with no plugin change; switching names selects a different file |
 | F2.3 | The bundled check-slug vocabulary lives in the runner agent file; a new slug is minted only when a finding fires on a check with no slug in the list — whether newly added to the lens or previously uncovered — after grepping the run log for an existing one | no two slugs for one lens question across the pilot log |
-| F2.4 | Terminal-round logging per §7.1 (`lens` = name); non-terminal rounds never log | US-4 acceptance |
+| F2.4 | Terminal-round logging per §7.1 (`lens` = name); mid-loop FIX rounds log only when the worker holds for owner go (`verdict: held`); auto-apply FIX rounds never log | US-4 acceptance |
 | F2.5 | Optional `class` on findings (§7.1); runner sets it for repeatable patterns with reuse-before-mint; rounds ≥2 prelude A (class verify) → B (fix-regression) → Process; round 1 cite-stability FIX with reserved `fragile-line-cites` | US-2 acceptance; append validator accepts optional `class`; schema fixture in tests |
 
 ### F3 — Enforcement (Stop hook)
@@ -244,7 +244,7 @@ All schemas are JSON Schema Draft 2020-12. Contracts directory in the plugin rep
     "lens": { "type": "string", "description": "configured lens name used for this run" },
     "deliverable": { "type": "string", "minLength": 1 },
     "rounds": { "type": "integer", "minimum": 1 },
-    "verdict": { "enum": ["pass", "escalated"] },
+    "verdict": { "enum": ["pass", "escalated", "held"] },
     "host": { "enum": ["claude-code", "cursor", "codex"], "description": "absent in records written before Cursor support = claude-code" },
     "findings": {
       "type": "array",
@@ -256,7 +256,7 @@ All schemas are JSON Schema Draft 2020-12. Contracts directory in the plugin rep
           "check": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
           "target": { "type": "string" },
           "severity": { "enum": ["FIX", "ESCALATE"] },
-          "reaction": { "enum": ["fixed", "fixed-class", "disputed", "escalated"] },
+          "reaction": { "enum": ["fixed", "fixed-class", "disputed", "escalated", "pending-owner"] },
           "note": { "type": "string" },
           "class": {
             "type": "string",

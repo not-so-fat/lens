@@ -1,14 +1,19 @@
 {
   "name": "lens",
-  "version": "0.2.5",
-  "description": "Personal review standards for AI agents — runner, Stop-hook enforcement, run log",
+  "version": "0.2.6",
+  "description": "Personal review standards for AI agents \u2014 runner, Stop-hook enforcement, run log",
   "author": {
     "name": "not-so-fat",
     "url": "https://github.com/not-so-fat"
   },
   "homepage": "https://github.com/not-so-fat/lens",
   "repository": "https://github.com/not-so-fat/lens",
-  "keywords": ["lens", "review", "enforcement", "codex-plugin"],
+  "keywords": [
+    "lens",
+    "review",
+    "enforcement",
+    "codex-plugin"
+  ],
   "agents": "./agents/codex/lens.toml",
   "commands": "./commands/",
   "hooks": "./hooks/codex-hooks.json",
@@ -18,7 +23,9 @@
     "longDescription": "Lens runs your named review standards as a buddy reviewer, enforces them with a Stop hook so a deliverable can't finish un-reviewed, and logs every run. On Codex the reviewer and hooks are doctor-managed into ~/.codex/.",
     "developerName": "not-so-fat",
     "category": "Productivity",
-    "capabilities": ["Read"],
+    "capabilities": [
+      "Read"
+    ],
     "websiteURL": "https://github.com/not-so-fat/lens",
     "brandColor": "#6366f1",
     "defaultPrompt": [

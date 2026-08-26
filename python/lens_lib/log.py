@@ -14,6 +14,10 @@ CHECK_SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 FINDING_KEYS = frozenset(
     {"round", "check", "target", "severity", "reaction", "note", "class"}
 )
+VALID_VERDICTS = frozenset({"pass", "escalated", "held"})
+VALID_REACTIONS = frozenset(
+    {"fixed", "fixed-class", "disputed", "escalated", "pending-owner"}
+)
 
 
 def ensure_log(log_path: Path) -> Path:
@@ -67,7 +71,7 @@ def has_lens_run_since(log_path: Path, since_iso: Optional[str]) -> bool:
 
     Fail closed when since_iso is None or unparseable — never treat an
     unbounded / broken window as satisfied by a historical run.
-    Both pass and escalated terminal lens_run records satisfy the gate.
+    Both pass, escalated, and held terminal lens_run records satisfy the gate.
     """
     since = parse_iso_ts(since_iso) if since_iso else None
     if since is None:
@@ -137,7 +141,7 @@ def has_lens_run_for_sessions(
     since_iso: Optional[str] = None,
     allow_untagged: bool = False,
 ) -> bool:
-    """True if a lens_run satisfies this session's gate (pass or escalated)."""
+    """True if a lens_run satisfies this session's gate (any terminal verdict)."""
     return _has_event_for_sessions(
         log_path, session_ids, "lens_run",
         since_iso=since_iso, allow_untagged=allow_untagged,
@@ -294,8 +298,8 @@ def validate_lens_run_shape(record: Dict[str, Any]) -> List[str]:
             errors.append(f"missing {k}")
     if record.get("event") != "lens_run":
         errors.append("event must be lens_run")
-    if record.get("verdict") not in ("pass", "escalated"):
-        errors.append("verdict must be pass|escalated")
+    if record.get("verdict") not in VALID_VERDICTS:
+        errors.append("verdict must be pass|escalated|held")
     findings = record.get("findings")
     if not isinstance(findings, list):
         errors.append("findings must be array")
@@ -307,6 +311,11 @@ def validate_lens_run_shape(record: Dict[str, Any]) -> List[str]:
             for k in ("round", "check", "target", "severity", "reaction"):
                 if k not in f:
                     errors.append(f"findings[{i}] missing {k}")
+            if f.get("reaction") not in VALID_REACTIONS:
+                errors.append(
+                    f"findings[{i}] reaction must be one of: "
+                    + "|".join(sorted(VALID_REACTIONS))
+                )
             extra = set(f.keys()) - FINDING_KEYS
             if extra:
                 errors.append(f"findings[{i}] unknown keys: {sorted(extra)}")

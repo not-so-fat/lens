@@ -798,6 +798,37 @@ class FindingShapeTests(unittest.TestCase):
         errors = validate_lens_run_shape(self._record([finding]))
         self.assertTrue(any("bad class label" in e for e in errors))
 
+    def test_held_verdict_and_pending_owner_reaction(self):
+        from lens_lib.log import validate_lens_run_shape
+
+        record = self._record(
+            [
+                {
+                    "round": 1,
+                    "check": "source-grounded",
+                    "target": "§2",
+                    "severity": "FIX",
+                    "reaction": "pending-owner",
+                    "note": "awaiting owner go",
+                }
+            ]
+        )
+        record["verdict"] = "held"
+        self.assertEqual(validate_lens_run_shape(record), [])
+
+    def test_rejects_bad_reaction(self):
+        from lens_lib.log import validate_lens_run_shape
+
+        finding = {
+            "round": 1,
+            "check": "x",
+            "target": "t",
+            "severity": "FIX",
+            "reaction": "waiting",
+        }
+        errors = validate_lens_run_shape(self._record([finding]))
+        self.assertTrue(any("reaction must be" in e for e in errors))
+
 
 class LensInvocationDetectionTests(unittest.TestCase):
     """F3.5: detect an explicit 'use the lens' request without misfiring."""

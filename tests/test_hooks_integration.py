@@ -251,6 +251,50 @@ class HookIntegrationTests(unittest.TestCase):
         self.assertFalse(rec["blocked"])
         self.assertTrue(rec["lens_run_found"])
 
+    def test_claude_stop_passes_with_held_lens_run(self):
+        """verdict: held satisfies the gate without hook changes (NOT-35)."""
+        transcript = self._transcript_with_write()
+        with self.log.open("a", encoding="utf-8") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "ts": "2026-08-01T10:00:02.000Z",
+                        "event": "lens_run",
+                        "lens": "review",
+                        "deliverable": "out",
+                        "rounds": 1,
+                        "verdict": "held",
+                        "host": "claude-code",
+                        "session": "sess-1",
+                        "findings": [
+                            {
+                                "round": 1,
+                                "check": "source-grounded",
+                                "target": "§2",
+                                "severity": "FIX",
+                                "reaction": "pending-owner",
+                                "note": "awaiting owner go",
+                            }
+                        ],
+                        "escalations": [],
+                    }
+                )
+                + "\n"
+            )
+        proc = _run_hook(
+            CLAUDE_STOP,
+            {
+                "transcript_path": str(transcript),
+                "session_id": "sess-1",
+                "cwd": str(self.td),
+            },
+            self.env,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        rec = json.loads(self.log.read_text(encoding="utf-8").strip().splitlines()[-1])
+        self.assertFalse(rec["blocked"])
+        self.assertTrue(rec["lens_run_found"])
+
     def test_claude_stop_no_watched_writes_passes(self):
         t = self.td / "empty.jsonl"
         t.write_text(

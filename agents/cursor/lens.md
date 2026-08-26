@@ -27,7 +27,7 @@ Host for logging: `cursor`. You are `readonly` — do not edit deliverables. On 
 1. Read the resolved lens markdown file.
 2. Read the deliverable (the paths the worker gives, or the inline content), plus any source material the worker names.
 3. On rounds ≥ 2, after prior findings and the worker's reactions, run in order before Process for new content:
-   - **A. Class verify** — For each prior finding with `class`, re-sweep that class scope (not only the prior `target`), even when reaction is `fixed` or `fixed-class`. Skip when reaction is `disputed` or `escalated`. New drift → same `check` + same `class` (new `target` / note), not a fresh unlabeled instance.
+   - **A. Class verify** — For each prior finding with `class`, re-sweep that class scope (not only the prior `target`), even when reaction is `fixed` or `fixed-class`. Skip when reaction is `disputed`, `escalated`, or `pending-owner`. New drift → same `check` + same `class` (new `target` / note), not a fresh unlabeled instance.
    - **B. Fix-regression** — Re-read siblings and mirrors of sections the worker changed while fixing (from the worker's paths, diff, or stated edits). Drift → normal findings (`sibling-inconsistency` / `source-grounded` as appropriate), with `class` when repeatable.
 4. Execute the lens's Process literally, walking every element as it instructs.
 5. On round 1, when the deliverable uses fragile locators (`file:line`, etc.) into same-day-edited or actively changing sources: raise one FIX under `source-grounded` with `class: fragile-line-cites` (reserved label; do not mint a synonym). Note must offer symbol/anchor cites **or** one end-of-loop re-derive.
@@ -44,15 +44,20 @@ Host for logging: `cursor`. You are `readonly` — do not edit deliverables. On 
 
 ## Logging
 
-A round is **terminal** when the verdict is PASS or every finding is ESCALATE (no new FIX). Only on a terminal round, produce ONE `lens_run` record:
+A round is **terminal** when the loop rests — nothing more happens without the owner or a later round:
+- **PASS** (no findings fired)
+- every finding is **ESCALATE** (no new FIX)
+- **FIX** findings and the worker is **holding for owner go** (wait-for-explicit-go: do not auto-apply; log and hand off)
+
+Only on a terminal round, produce ONE `lens_run` record:
 
 ```json
 {"ts": "<UTC ISO8601>", "event": "lens_run", "lens": "<lens name>",
  "deliverable": "<short description or repo path — the worker must reuse the same key every round>",
- "rounds": <this round number>, "verdict": "pass | escalated", "host": "cursor",
+ "rounds": <this round number>, "verdict": "pass | escalated | held", "host": "cursor",
  "session": "<conversation_id or session_id from this chat>",
  "findings": [{"round": 1, "check": "...", "target": "...", "severity": "FIX | ESCALATE",
-               "reaction": "fixed | fixed-class | disputed | escalated", "note": "...",
+               "reaction": "fixed | fixed-class | disputed | escalated | pending-owner", "note": "...",
                "class": "<optional kebab label>"}],
  "escalations": ["the specific question, if any"]}
 ```
@@ -69,10 +74,11 @@ The worker must append it via the append launcher (a bare `python3 <path>`, cwd-
 - `"session"` must be this chat's conversation/session id (Cursor stop has no transcript window without it as a backup).
 - Prior rounds' findings and the worker's stated reaction to each come from the worker's prompt — include them all in `findings` with their round numbers and every logged field (`class` must round-trip).
 - This round's ESCALATE findings get `reaction: "escalated"`.
-- On a non-terminal round (new FIX findings), do NOT emit `LENS_LOG_APPEND` — the worker will return.
+- On FIX when the worker will auto-apply and return for round 2+, do NOT emit `LENS_LOG_APPEND` — the worker will return.
+- On FIX when the worker holds for owner go: log with `verdict: "held"`; this round's FIX findings get `reaction: "pending-owner"`.
 - Ask the worker to set `ts` from `date -u +%Y-%m-%dT%H:%M:%SZ` when appending — never estimate.
 - Always include `"host": "cursor"`.
-- Either `verdict: "pass"` or `"escalated"` is a terminal `lens_run` and satisfies the stop-hook gate (enforcement does not require pass).
+- Either `verdict: "pass"`, `"escalated"`, or `"held"` is a terminal `lens_run` and satisfies the stop-hook gate (`held` ≠ pass; analytics stay honest).
 
 ## Reply format
 
@@ -81,7 +87,8 @@ Return to the worker, in this order:
 <!-- SHARED:reply START -->
 1. Verdict: `PASS`, `FIX`, or `ESCALATE`.
 2. Each finding on one line: `SEVERITY check @ target — note` (name the class when `class` is set).
-3. If FIX: for findings with `class`, require a class-wide sweep (all comparable elements, not just the flagged instance). Worker returns with the same deliverable key, the next round number, reaction per finding (`fixed-class` when they swept the class), and **prior_findings including every logged field** (`class` must round-trip).
+3. If FIX and the worker will auto-apply: for findings with `class`, require a class-wide sweep (all comparable elements, not just the flagged instance). Worker returns with the same deliverable key, the next round number, reaction per finding (`fixed-class` when they swept the class), and **prior_findings including every logged field** (`class` must round-trip).
+4. If FIX and the worker holds for owner go: this round is terminal — log with `verdict: "held"` (see Logging); worker waits for owner "apply" or "hold" before round 2.
 <!-- SHARED:reply END -->
 
 4. If terminal: the `LENS_LOG_APPEND:` line.
