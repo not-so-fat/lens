@@ -23,10 +23,11 @@ Git tag form: `vMAJOR.MINOR.PATCH` (e.g. `v0.1.1`).
    PYTHONPATH=python python3 -m unittest discover -s tests -v
    ```
 2. **Runner consistency (#9)** — `tests/test_runner_consistency.py` must pass. Claude (`agents/lens.md`) and Cursor (`agents/cursor/lens.md`) keep host-specific Logging / frontmatter, but spans wrapped in `<!-- SHARED:name START/END -->` must be byte-identical (`role`, `paths`, `procedure`, `reply`). Edit shared prose inside those markers on **both** files the same way (or copy one side to the other). Highest-risk drift: the check-slug vocabulary inside `SHARED:procedure`.
-3. **Manifest ↔ tag check** — `tests/test_release_manifest.py` keeps the five plugin/marketplace `version` fields in sync with `docs/RELEASE.md`. After tagging on `main`, confirm the tag points at the intended commit:
+3. **Manifest ↔ tag check** — `tests/test_release_manifest.py` keeps the five plugin/marketplace `version` fields in sync with `docs/RELEASE.md`. After the version-bump commit is on `main` and tagged, confirm the tag peels to `HEAD`:
    ```bash
    LENS_RELEASE_CHECK=1 PYTHONPATH=python python3 -m unittest tests.test_release_manifest -v
    ```
+   Uses annotated tags (`git tag -a`); the check resolves the tagged **commit**, not the tag object.
 4. **Doctor smoke** (optional but recommended on a real machine): `/lens-doctor` green after install.
 5. **PR merged** to `main` (default branch). Do not tag from a feature branch tip unless that tip is what `main` is.
 
@@ -39,12 +40,17 @@ From a clean checkout of `main`:
 git checkout main
 git pull origin main
 
-# 2. Bump the five version fields if this cut is a new semver
-#    (skip if already bumped in the merge)
+# 2. Bump the five version fields + commit on main
+#    chore(release): bump to vX.Y.Z
 
-# 3. Tag + push
-git tag -a v0.1.1 -m "lens v0.1.1"
+git push origin main
+
+# 3. Tag the bump commit (must be HEAD — tag after the bump lands on main)
+git tag -a v0.1.1 -m "lens v0.1.1" HEAD
 git push origin v0.1.1
+
+# Re-cutting the same version? Delete the stale tag first:
+#   git tag -d v0.1.1 && git push origin :refs/tags/v0.1.1
 
 # 3b. Confirm manifest version ↔ tag at HEAD
 LENS_RELEASE_CHECK=1 PYTHONPATH=python python3 -m unittest tests.test_release_manifest -v
@@ -73,6 +79,7 @@ Hosts often pin a marketplace commit; a tag/Release makes the intended revision 
 
 ## What not to do
 
-- Do not ship with failing `test_runner_consistency` (shared slug / procedure drift).
+- Do not tag before the version-bump commit is on `main` (tag must peel to `HEAD`).
+- Do not reuse a local tag name from an earlier attempt without deleting it first.
 - Do not bump only one host’s `plugin.json`.
 - Do not treat GitHub Release assets as required — the install source is the git tree at the tag.
