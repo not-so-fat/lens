@@ -15,6 +15,7 @@ from .config import resolve_config
 from .log import (
     append_record,
     latest_gate_ts,
+    latest_lens_run_ts,
     latest_lens_skip_for_sessions,
     latest_lens_skip_ts,
 )
@@ -56,12 +57,9 @@ def _existing_skip_for_deliverable(
     since_iso: Optional[str] = None,
 ) -> Optional[dict]:
     """Return an existing lens_skip for this session+deliverable since since_iso."""
-    existing = latest_lens_skip_for_sessions(
-        log_path, [session], since_iso=since_iso
+    return latest_lens_skip_for_sessions(
+        log_path, [session], since_iso=since_iso, deliverable=deliverable
     )
-    if existing is not None and existing.get("deliverable") == deliverable:
-        return existing
-    return None
 
 
 def skip_deliverable(
@@ -93,7 +91,10 @@ def skip_deliverable(
         if pending is None:
             if skip_ts and gate_ts == skip_ts:
                 existing = _existing_skip_for_deliverable(
-                    cfg.log_path, session, deliverable, since_iso=skip_ts
+                    cfg.log_path,
+                    session,
+                    deliverable,
+                    since_iso=latest_lens_run_ts(cfg.log_path, [session]),
                 )
                 if existing is not None:
                     return existing, str(cfg.log_path), False

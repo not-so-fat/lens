@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -959,6 +960,7 @@ class SkipIdempotencyTests(unittest.TestCase):
                     if json.loads(line).get("event") == "lens_skip"
                 ]
                 self.assertEqual(len(skips), 2)
+                time.sleep(1.05)
                 rec_a2, _, appended_a2 = skip_deliverable(
                     "deliverable-a",
                     session="sess-multi",

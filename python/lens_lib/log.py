@@ -230,6 +230,7 @@ def latest_lens_skip_for_sessions(
     session_ids: Sequence[str],
     *,
     since_iso: Optional[str] = None,
+    deliverable: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """Most recent lens_skip for session ids (by ts), optionally since since_iso."""
     wanted = {str(s) for s in session_ids if s and s != "unknown"}
@@ -240,6 +241,8 @@ def latest_lens_skip_for_sessions(
     latest_rec: Optional[Dict[str, Any]] = None
     for rec in iter_records(log_path):
         if rec.get("event") != "lens_skip":
+            continue
+        if deliverable is not None and rec.get("deliverable") != deliverable:
             continue
         rec_ids = _lens_run_session_ids(rec)
         if not (rec_ids & wanted):
