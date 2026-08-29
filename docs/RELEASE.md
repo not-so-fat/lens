@@ -4,7 +4,7 @@ Lens ships as a **GitHub repo marketplace** (Claude Code + Cursor). There is no 
 
 ## Version fields (keep in sync)
 
-Bump these five together (semver, currently `0.2.6`):
+Bump these six version keys together across five files (semver, currently `0.2.6`):
 
 | File | Field |
 | --- | --- |
@@ -23,12 +23,8 @@ Git tag form: `vMAJOR.MINOR.PATCH` (e.g. `v0.1.1`).
    PYTHONPATH=python python3 -m unittest discover -s tests -v
    ```
 2. **Runner consistency (#9)** — `tests/test_runner_consistency.py` must pass. Claude (`agents/lens.md`) and Cursor (`agents/cursor/lens.md`) keep host-specific Logging / frontmatter, but spans wrapped in `<!-- SHARED:name START/END -->` must be byte-identical (`role`, `paths`, `procedure`, `reply`). Edit shared prose inside those markers on **both** files the same way (or copy one side to the other). Highest-risk drift: the check-slug vocabulary inside `SHARED:procedure`.
-3. **Manifest ↔ tag check** — `tests/test_release_manifest.py` keeps the five plugin/marketplace `version` fields in sync with `docs/RELEASE.md`. After tagging on `main`, confirm the tag points at the intended commit:
-   ```bash
-   LENS_RELEASE_CHECK=1 PYTHONPATH=python python3 -m unittest tests.test_release_manifest -v
-   ```
-4. **Doctor smoke** (optional but recommended on a real machine): `/lens-doctor` green after install.
-5. **PR merged** to `main` (default branch). Do not tag from a feature branch tip unless that tip is what `main` is.
+3. **Doctor smoke** (optional but recommended on a real machine): `/lens-doctor` green after install.
+4. **PR merged** to `main` (default branch). Do not tag from a feature branch tip unless that tip is what `main` is.
 
 ## Cut a release
 
@@ -39,27 +35,27 @@ From a clean checkout of `main`:
 git checkout main
 git pull origin main
 
-# 2. Bump the five version fields if this cut is a new semver
+# 2. Bump the six version keys if this cut is a new semver
 #    (skip if already bumped in the merge)
 
-# 3. Tag + push
-git tag -a v0.1.1 -m "lens v0.1.1"
-git push origin v0.1.1
+# 3. Tag + push (replace X.Y.Z with the manifest version)
+git tag -a vX.Y.Z -m "lens vX.Y.Z"
+git push origin vX.Y.Z
 
 # 3b. Confirm manifest version ↔ tag at HEAD
 LENS_RELEASE_CHECK=1 PYTHONPATH=python python3 -m unittest tests.test_release_manifest -v
 
 # 4. GitHub Release (notes for humans / changelog)
-gh release create v0.1.1 --title "v0.1.1" --notes-file - <<'EOF'
-## Lens v0.1.1
+gh release create vX.Y.Z --title "vX.Y.Z" --notes-file - <<'EOF'
+## Lens vX.Y.Z
 
-First dual-host plugin release (Claude Code + Cursor desktop).
+<changelog bullets>
 
 ### Install
-- Claude: `claude plugin marketplace add not-so-fat/lens` then `claude plugin install lens@lens-plugins`
-- Cursor: Import marketplace `https://github.com/not-so-fat/lens` (pin `v0.1.1`), install `lens`, reload, `/lens-doctor`
+- Claude: `claude plugin marketplace add not-so-fat/lens` then pin `vX.Y.Z`
+- Cursor: Import marketplace `https://github.com/not-so-fat/lens` (pin `vX.Y.Z`), install `lens`, reload, `/lens-doctor`
 
-Pin installs to tag `v0.1.1` when you need a frozen revision. See README “Install” for the marketplace flow (both hosts); the git-clone/local-dir method is under “Local development”.
+Pin installs to tag `vX.Y.Z` when you need a frozen revision. See README “Install” for the marketplace flow (both hosts); the git-clone/local-dir method is under “Local development”.
 EOF
 ```
 
