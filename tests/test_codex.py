@@ -17,6 +17,7 @@ PYTHON = ROOT / "python"
 sys.path.insert(0, str(PYTHON))
 
 from lens_lib.codex_writes import extract_codex_write_paths  # noqa: E402
+from lens_lib.util import utc_now_iso  # noqa: E402
 
 CODEX_STOP = PYTHON / "codex_stop.py"
 CODEX_POST = PYTHON / "codex_post_tool_use.py"
@@ -202,6 +203,42 @@ class CodexGateTests(unittest.TestCase):
         s = self._stop(session="cx-2")
         out = json.loads(s.stdout or "{}")
         self.assertNotEqual(out.get("decision"), "block", f"stdout={s.stdout} err={s.stderr}")
+
+    def test_second_write_reblocks_after_lens_run(self):
+        """Step 6 (NOT-40): a fresh watched write after gate clear blocks again."""
+        self._post_write()
+        s = self._stop()
+        self.assertEqual(json.loads(s.stdout or "{}").get("decision"), "block")
+        append = PYTHON / "lens_append.py"
+        rec = {
+            "ts": utc_now_iso(),
+            "lens": "review",
+            "deliverable": "out.md",
+            "rounds": 1,
+            "verdict": "pass",
+            "findings": [],
+            "escalations": [],
+        }
+        subprocess.run(
+            [sys.executable, str(append), "--host", "codex", "--session", "cx-1",
+             "--json", json.dumps(rec)],
+            text=True, capture_output=True, env=self.env, cwd=str(self.td), check=False,
+        )
+        s2 = self._stop()
+        self.assertNotEqual(json.loads(s2.stdout or "{}").get("decision"), "block")
+        # second deliverable in same session
+        other = self.td / "out2.md"
+        other.write_text("more", encoding="utf-8")
+        payload = {
+            "tool_name": "apply_patch",
+            "tool_input": PATCH.format(p=str(other)),
+            "session_id": "cx-1",
+            "cwd": str(self.td),
+        }
+        _run(CODEX_POST, payload, self.env, cwd=self.td)
+        s3 = self._stop()
+        out3 = json.loads(s3.stdout or "{}")
+        self.assertEqual(out3.get("decision"), "block", f"stdout={s3.stdout} err={s3.stderr}")
 
     def test_arming_creates_marker(self):
         payload = {"prompt": "use the review lens on this", "session_id": "cx-arm"}

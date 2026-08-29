@@ -11,8 +11,13 @@ from typing import Optional
 
 
 def utc_now_iso() -> str:
-    """System-clock UTC timestamp (never model-estimated)."""
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    """System-clock UTC timestamp (never model-estimated).
+
+    Millisecond resolution so a lens_run and a back-to-back side-channel write
+    in the same wall-clock second still order deterministically (NOT-40).
+    """
+    dt = datetime.now(timezone.utc)
+    return dt.strftime("%Y-%m-%dT%H:%M:%S.") + f"{dt.microsecond // 1000:03d}Z"
 
 
 def expand_path(path: str) -> Path:
