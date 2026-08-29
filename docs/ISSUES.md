@@ -31,6 +31,34 @@ If `afterFileEdit` omits workspace **and** `stop` uses a different conversation 
 
 Not automatable from unittest. Manual smoke in README (“Manual Cursor smoke”). Run once after install before calling Cursor support verified.
 
+### I-11 — live Codex CLI/desktop E2E (NOT-40)
+
+**Status:** hook enforcement validated via installed-hook replay (session `codex-e2e-not40`, 2026-08-29). Three `hook_check` lines with `host: "codex"` appended to `log_path`. Full desktop turn not yet exercised in a live Codex chat — same class of gap as I-4.
+
+**Validated (installed hooks, realistic payloads):**
+
+1. `UserPromptSubmit` arms on explicit lens request (`prompt` + `session_id`).
+2. `PostToolUse` records watched writes from `apply_patch` envelopes (`tool_name` + `tool_input`, `session_id`, `cwd`).
+3. `Stop` blocks via `{"decision":"block","reason":…}` and appends `hook_check` with `host: "codex"`.
+4. Session-tagged `lens_run` clears the gate.
+5. A second watched write in the same session re-blocks (side-channel `after_ts` window, same as Cursor I-7).
+
+**Payload assumptions (not yet confirmed from a live Codex host dump):**
+
+| Hook | Fields read | Notes |
+| --- | --- | --- |
+| `UserPromptSubmit` | `prompt` / `user_prompt` / `userPrompt`; `session_id` / `sessionId` | Arming message printed to stdout (Codex surfaces hook stdout to the agent). |
+| `PostToolUse` | `tool_name` / `toolName`; `tool_input` / `toolInput`; `session_id` / `sessionId` / `conversation_id` / `conversationId`; `cwd` / `workspace_root` | Writes extracted from `apply_patch` inside `shell`/`local_shell` command lists and bare string envelopes. Read-only `shell` calls record nothing. |
+| `Stop` | same session fields + `cwd` | No `transcript_path` — gate uses PostToolUse side-channel only. Block via `decision:block`; warn-only paths go to stderr. |
+
+**Config assumptions:**
+
+- Doctor renders `~/.codex/hooks.json` + `~/.codex/agents/lens.toml` with **absolute** script paths (no `${CODEX_PLUGIN_ROOT}` at runtime).
+- `sandbox_mode=workspace-write` requires `log_path`'s parent in `[sandbox_workspace_write].writable_roots`; default mode may prompt for log append approval.
+- Codex IDE extension: out of scope (hooks undocumented — §10).
+
+**Smoke:** README “Manual Codex smoke”. Replay helper: `.temporal/scripts/codex_live_smoke.py` (appends real telemetry).
+
 ### I-7 — chat-scoped gate (Claude) / write-batch after last run (Cursor)
 
 - **Claude (F3.1):** still session-window (`ts ≥` transcript first-event) — one early `lens_run` can clear later writes in the same transcript. Deliverable keys not required.

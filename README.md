@@ -217,3 +217,27 @@ Automated tests mock hook payloads; they do not prove Cursor fires real `afterFi
 5. Then: `Run the lens agent with lens=<your default>, deliverable="demo-lens-smoke", files=["demo-lens-smoke.md"]` — expect a `lens_run` line and a clean stop afterward.
 
 Optional: dump the last few JSONL lines from `log_path` and confirm `host: "cursor"` and `session_ids` populated.
+
+## Manual Codex smoke (I-11)
+
+Automated tests mock hook payloads; they do not prove Codex fires real `PostToolUse` / `Stop`. One-shot CLI or desktop check:
+
+1. Run `/lens-doctor` (all green, including `codex_install` and `codex_writable_roots`).
+2. Point `default_lens` at `tests/fixtures/sample_lens.md` (absolute path) and a writable `log_path`.
+3. In a **new** Codex session in any workspace, ask:
+
+   ```text
+   Create a short file demo-codex-smoke.md in this workspace with one heading and
+   two bullets. Do not run any lens. Stop when the file exists.
+   ```
+
+4. **Expect:** `Stop` re-prompts with a block mentioning the `lens` agent. Check `log_path` for `hook_check` with `host: "codex"`, `wrote_watched: true`, `blocked: true`.
+5. Then: `Run the lens agent with lens=<your default>, deliverable="demo-codex-smoke", files=["demo-codex-smoke.md"]` — expect a `lens_run` with `host: "codex"` and a clean stop afterward.
+6. Edit the file again without running the lens — expect another block (fresh write batch).
+
+**Arming check (optional):** in a new session, ask `use the <default_lens> lens on a chat summary` (no file write). Expect arming notice; `Stop` should block even with no watched writes until a `lens_run` lands.
+
+**Replay helper** (installed hooks, appends real telemetry):  
+`python3 .temporal/scripts/codex_live_smoke.py --session codex-smoke-<date>`
+
+Payload/config assumptions: [`docs/ISSUES.md`](docs/ISSUES.md) I-11.
