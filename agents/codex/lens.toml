@@ -67,6 +67,8 @@ The worker must append it via the append launcher (a bare `python3 <path>`, cwd-
 
 `python3 "${CODEX_PLUGIN_ROOT}/python/lens_append.py" --host codex --session '<id>' --json '...'`
 
+The launcher assigns a stable `run_id` and prints `lens_run_id: lr_…` on stderr — use it for owner review close (step 5).
+
 - `"lens"` is the **name** (not the file path).
 - `"session"` must be this session's `session_id` (the Codex stop gate is session-scoped, with no transcript window).
 - Prior rounds' findings and the worker's stated reaction to each come from the worker's prompt — include them all in `findings` with their round numbers and every logged field (`class` must round-trip).
@@ -87,4 +89,8 @@ Return to the worker, in this order:
 3. If FIX and `hold_policy` is `auto-apply` or absent: for findings with `class`, require a class-wide sweep (all comparable elements, not just the flagged instance). Worker returns with the same deliverable key, the next round number, reaction per finding (`fixed-class` when they swept the class), and **prior_findings including every logged field** (`class` must round-trip).
 4. If FIX and `hold_policy=wait-for-go`: this round is terminal — log with `verdict: "held"` (see Logging); worker waits for owner "apply" or "hold" before round 2.
 5. If terminal: the `LENS_LOG_APPEND:` line.
+6. **Owner review handoff** — after the worker appends the terminal `lens_run`, offer the lens owner a one-line close when they finish reading the deliverable. Read `lens_run_id` from the append launcher stderr (`lens_run_id: lr_…`). Do not infer miss/noise from edits alone.
+   - No corrections: `python3 -m lens_lib close --run-id <lr_…> --corrections 0`.
+   - With misses/noise: add `--miss "check:note"` / `--noise "check:note"` (kebab-case check slug).
+   Skip if a `human_review` for that `lens_run_id` already exists.
 """

@@ -10,7 +10,7 @@ from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 
 from .config import Config, resolve_config, resolve_lens
 from .lens_parse import apply_lens_ops, parse_lens_file, render_patch_diff
-from .log import ensure_log, latest_lens_run_for_deliverable
+from .log import ensure_log, iter_records
 from .util import correction_signals_path, lens_patches_path, utc_now_iso
 
 CHECK_SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
@@ -63,6 +63,9 @@ def validate_correction_signal(record: Dict[str, Any]) -> List[str]:
         errors.append("kind must be miss|noise")
     if record.get("status") not in ("open", "actioned", "discarded"):
         errors.append("status must be open|actioned|discarded")
+    run_id = record.get("lens_run_id")
+    if run_id is not None and not re.match(r"^lr_[a-f0-9]+$", str(run_id)):
+        errors.append("bad lens_run_id")
     return errors
 
 
@@ -135,18 +138,14 @@ def append_patch(record: Dict[str, Any]) -> Path:
 
 def capture_from_human_review(
     *,
-    deliverable: str,
+    run: Dict[str, Any],
     misses: Optional[List[dict]] = None,
     noise: Optional[List[dict]] = None,
-    log_path: Optional[Path] = None,
 ) -> List[dict]:
     """Append correction_signal rows for misses/noise after /lens-close."""
-    cfg = resolve_config()
-    log = log_path or cfg.log_path
-    run = latest_lens_run_for_deliverable(log, deliverable)
-    if not run:
-        raise ValueError(f"no lens_run for deliverable {deliverable!r}")
+    deliverable = str(run["deliverable"])
     lens_name = str(run["lens"])
+    lens_run_id = run.get("run_id")
     lens_run_ts = str(run.get("ts") or "")
     signals: List[dict] = []
     for kind, items in (("miss", misses or []), ("noise", noise or [])):
@@ -164,9 +163,50 @@ def capture_from_human_review(
                 "status": "open",
                 "linked_patch_id": None,
             }
+            if lens_run_id:
+                sig["lens_run_id"] = lens_run_id
             append_signal(sig)
             signals.append(sig)
     return signals
+
+
+def funnel_stats(*, log_path: Optional[Path] = None) -> Dict[str, Any]:
+    """Report correction-flywheel counts from append-only logs."""
+    cfg = resolve_config()
+    log = log_path or cfg.log_path
+    terminal_runs = 0
+    runs_with_id = 0
+    human_reviews = 0
+    reviews_with_run_id = 0
+    for rec in iter_records(log):
+        event = rec.get("event")
+        if event == "lens_run":
+            terminal_runs += 1
+            if rec.get("run_id"):
+                runs_with_id += 1
+        elif event == "human_review":
+            human_reviews += 1
+            if rec.get("lens_run_id"):
+                reviews_with_run_id += 1
+    sig_path = correction_signals_path()
+    patch_path = lens_patches_path()
+    signals_open = len(list_signals(status="open"))
+    signals_actioned = len(list_signals(status="actioned"))
+    patches_proposed = len(list_patches(status="proposed"))
+    patches_accepted = len(list_patches(status="accepted"))
+    return {
+        "log_path": str(log),
+        "terminal_lens_runs": terminal_runs,
+        "terminal_runs_with_run_id": runs_with_id,
+        "human_reviews": human_reviews,
+        "human_reviews_with_run_id": reviews_with_run_id,
+        "correction_signals_open": signals_open,
+        "correction_signals_actioned": signals_actioned,
+        "lens_patches_proposed": patches_proposed,
+        "lens_patches_accepted": patches_accepted,
+        "correction_signals_path": str(sig_path),
+        "lens_patches_path": str(patch_path),
+    }
 
 
 def list_signals(

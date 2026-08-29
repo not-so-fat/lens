@@ -15,7 +15,7 @@ MARK = re.compile(
     re.DOTALL,
 )
 
-REQUIRED = {"role", "paths", "procedure", "reply"}
+REQUIRED = {"role", "paths", "procedure", "reply", "owner_review"}
 
 
 def shared_blocks(path: Path) -> dict:

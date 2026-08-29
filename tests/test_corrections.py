@@ -90,6 +90,7 @@ class CorrectionCaptureTests(unittest.TestCase):
             {
                 "ts": "2026-08-23T09:55:00Z",
                 "event": "lens_run",
+                "run_id": "lr_a111111111111111",
                 "lens": "review",
                 "deliverable": "d1",
                 "rounds": 1,
@@ -99,6 +100,22 @@ class CorrectionCaptureTests(unittest.TestCase):
             },
         )
         return td, home, lens, log, old_home
+
+    def _append_run(self, log: Path, *, run_id: str, ts: str) -> None:
+        append_record(
+            log,
+            {
+                "ts": ts,
+                "event": "lens_run",
+                "run_id": run_id,
+                "lens": "review",
+                "deliverable": "d1",
+                "rounds": 1,
+                "verdict": "pass",
+                "findings": [],
+                "escalations": [],
+            },
+        )
 
     def test_close_appends_miss_and_noise_signals(self):
         td, home, lens, log, old_home = self._home()
@@ -116,11 +133,14 @@ class CorrectionCaptureTests(unittest.TestCase):
                 self.assertEqual(validate_correction_signal(sig), [])
                 self.assertEqual(sig["status"], "open")
                 self.assertEqual(sig["lens"], "review")
+                self.assertEqual(sig["lens_run_id"], "lr_a111111111111111")
             lines = correction_signals_path().read_text(encoding="utf-8").strip().splitlines()
             self.assertEqual(len(lines), 2)
+            self._append_run(log, run_id="lr_b222222222222222", ts="2026-08-23T10:00:00Z")
             rec, _, signals2 = close_deliverable(
                 "d1",
                 0,
+                run_id="lr_b222222222222222",
                 misses=["source-grounded:Again."],
             )
             self.assertEqual(len(signals2), 1)
@@ -148,9 +168,11 @@ class CorrectionCaptureTests(unittest.TestCase):
                     signal_ids=[signals[0]["id"]],
                     ops=ops,
                 )
+            self._append_run(log, run_id="lr_b222222222222222", ts="2026-08-23T10:00:00Z")
             _, _, signals2 = close_deliverable(
                 "d1",
                 0,
+                run_id="lr_b222222222222222",
                 misses=["source-grounded:two"],
             )
             patch = propose_patch(
@@ -171,10 +193,11 @@ class CorrectionCaptureTests(unittest.TestCase):
         td, home, lens, log, old_home = self._home()
         try:
             _, _, s1 = close_deliverable(
-                "d1", 0, noise=["source-grounded:n1"]
+                "d1", 0, run_id="lr_a111111111111111", noise=["source-grounded:n1"]
             )
+            self._append_run(log, run_id="lr_b222222222222222", ts="2026-08-23T10:00:00Z")
             _, _, s2 = close_deliverable(
-                "d1", 0, noise=["source-grounded:n2"]
+                "d1", 0, run_id="lr_b222222222222222", noise=["source-grounded:n2"]
             )
             with self.assertRaises(ValueError):
                 propose_patch(
@@ -206,10 +229,11 @@ class CorrectionCaptureTests(unittest.TestCase):
         td, home, lens, log, old_home = self._home()
         try:
             _, _, s1 = close_deliverable(
-                "d1", 0, misses=["source-grounded:a"]
+                "d1", 0, run_id="lr_a111111111111111", misses=["source-grounded:a"]
             )
+            self._append_run(log, run_id="lr_b222222222222222", ts="2026-08-23T10:00:00Z")
             _, _, s2 = close_deliverable(
-                "d1", 0, misses=["source-grounded:b"]
+                "d1", 0, run_id="lr_b222222222222222", misses=["source-grounded:b"]
             )
             patch = propose_patch(
                 lens="review",
@@ -240,8 +264,13 @@ class CorrectionCaptureTests(unittest.TestCase):
     def test_apply_rejects_wrong_lens_path(self):
         td, home, lens, log, old_home = self._home()
         try:
-            _, _, s1 = close_deliverable("d1", 0, misses=["source-grounded:a"])
-            _, _, s2 = close_deliverable("d1", 0, misses=["source-grounded:b"])
+            _, _, s1 = close_deliverable(
+                "d1", 0, run_id="lr_a111111111111111", misses=["source-grounded:a"]
+            )
+            self._append_run(log, run_id="lr_b222222222222222", ts="2026-08-23T10:00:00Z")
+            _, _, s2 = close_deliverable(
+                "d1", 0, run_id="lr_b222222222222222", misses=["source-grounded:b"]
+            )
             from lens_lib.corrections import append_patch
 
             bad = {
@@ -285,8 +314,9 @@ class CorrectionCaptureTests(unittest.TestCase):
         try:
             from lens_lib.__main__ import main
 
-            close_deliverable("d1", 0, misses=["source-grounded:a"])
-            close_deliverable("d1", 0, misses=["source-grounded:b"])
+            close_deliverable("d1", 0, run_id="lr_a111111111111111", misses=["source-grounded:a"])
+            self._append_run(log, run_id="lr_b222222222222222", ts="2026-08-23T10:00:00Z")
+            close_deliverable("d1", 0, run_id="lr_b222222222222222", misses=["source-grounded:b"])
             sigs = list_signals()
             ops_file = Path(td.name) / "ops.json"
             ops_file.write_text(
