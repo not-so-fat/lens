@@ -23,8 +23,12 @@ Git tag form: `vMAJOR.MINOR.PATCH` (e.g. `v0.1.1`).
    PYTHONPATH=python python3 -m unittest discover -s tests -v
    ```
 2. **Runner consistency (#9)** — `tests/test_runner_consistency.py` must pass. Claude (`agents/lens.md`) and Cursor (`agents/cursor/lens.md`) keep host-specific Logging / frontmatter, but spans wrapped in `<!-- SHARED:name START/END -->` must be byte-identical (`role`, `paths`, `procedure`, `reply`). Edit shared prose inside those markers on **both** files the same way (or copy one side to the other). Highest-risk drift: the check-slug vocabulary inside `SHARED:procedure`.
-3. **Doctor smoke** (optional but recommended on a real machine): `/lens-doctor` green after install.
-4. **PR merged** to `main` (default branch). Do not tag from a feature branch tip unless that tip is what `main` is.
+3. **Manifest ↔ tag check** — `tests/test_release_manifest.py` keeps the five plugin/marketplace `version` fields in sync with `docs/RELEASE.md`. After tagging on `main`, confirm the tag points at the intended commit:
+   ```bash
+   LENS_RELEASE_CHECK=1 PYTHONPATH=python python3 -m unittest tests.test_release_manifest -v
+   ```
+4. **Doctor smoke** (optional but recommended on a real machine): `/lens-doctor` green after install.
+5. **PR merged** to `main` (default branch). Do not tag from a feature branch tip unless that tip is what `main` is.
 
 ## Cut a release
 
@@ -41,6 +45,9 @@ git pull origin main
 # 3. Tag + push
 git tag -a v0.1.1 -m "lens v0.1.1"
 git push origin v0.1.1
+
+# 3b. Confirm manifest version ↔ tag at HEAD
+LENS_RELEASE_CHECK=1 PYTHONPATH=python python3 -m unittest tests.test_release_manifest -v
 
 # 4. GitHub Release (notes for humans / changelog)
 gh release create v0.1.1 --title "v0.1.1" --notes-file - <<'EOF'
