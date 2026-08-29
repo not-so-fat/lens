@@ -924,6 +924,57 @@ class LensInvocationDetectionTests(unittest.TestCase):
         self.assertFalse(is_lens_invocation(["use", "lens"], ["yusuke"]))
 
 
+class SkipIdempotencyTests(unittest.TestCase):
+    def test_distinct_deliverables_in_one_batch_both_log(self):
+        from lens_lib.skip import skip_deliverable
+
+        with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:
+            home = Path(td) / "home"
+            home.mkdir()
+            log = Path(td) / "runs.jsonl"
+            old_home = os.environ.get("HOME")
+            os.environ["HOME"] = str(home)
+            os.environ.pop("LENS_LOG_PATH", None)
+            try:
+                write_config(str(log), lenses={"review": str(Path(td) / "l.md")})
+                Path(td, "l.md").write_text(SAMPLE)
+                rec_a, _, appended_a = skip_deliverable(
+                    "deliverable-a",
+                    session="sess-multi",
+                    host="cursor",
+                    workspace_root=td,
+                )
+                self.assertTrue(appended_a)
+                rec_b, _, appended_b = skip_deliverable(
+                    "deliverable-b",
+                    session="sess-multi",
+                    host="cursor",
+                    workspace_root=td,
+                )
+                self.assertTrue(appended_b)
+                self.assertNotEqual(rec_a["deliverable"], rec_b["deliverable"])
+                skips = [
+                    json.loads(line)
+                    for line in log.read_text(encoding="utf-8").splitlines()
+                    if json.loads(line).get("event") == "lens_skip"
+                ]
+                self.assertEqual(len(skips), 2)
+                rec_a2, _, appended_a2 = skip_deliverable(
+                    "deliverable-a",
+                    session="sess-multi",
+                    host="cursor",
+                    workspace_root=td,
+                )
+                self.assertFalse(appended_a2)
+                self.assertEqual(rec_a2["deliverable"], "deliverable-a")
+                self.assertEqual(len([l for l in log.read_text().splitlines() if l]), 2)
+            finally:
+                if old_home is None:
+                    os.environ.pop("HOME", None)
+                else:
+                    os.environ["HOME"] = old_home
+
+
 class LatestGateTsTests(unittest.TestCase):
     def test_latest_gate_ts_prefers_later_run_or_skip(self):
         with tempfile.TemporaryDirectory() as td:

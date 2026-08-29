@@ -14,7 +14,6 @@ from .check import read_arm_ts
 from .config import resolve_config
 from .log import (
     append_record,
-    has_lens_skip_for_sessions,
     latest_gate_ts,
     latest_lens_skip_for_sessions,
     latest_lens_skip_ts,
@@ -49,6 +48,22 @@ def _pending_write_batch_start(
     return earliest
 
 
+def _existing_skip_for_deliverable(
+    log_path,
+    session: str,
+    deliverable: str,
+    *,
+    since_iso: Optional[str] = None,
+) -> Optional[dict]:
+    """Return an existing lens_skip for this session+deliverable since since_iso."""
+    existing = latest_lens_skip_for_sessions(
+        log_path, [session], since_iso=since_iso
+    )
+    if existing is not None and existing.get("deliverable") == deliverable:
+        return existing
+    return None
+
+
 def skip_deliverable(
     deliverable: str,
     *,
@@ -60,10 +75,14 @@ def skip_deliverable(
     """
     Append a lens_skip unless one already satisfies the pending batch.
 
+    Idempotency is per session + pending batch + deliverable — repeating the
+    same skip is a no-op, but distinct deliverables in one batch still log.
+
     Returns (record, log_path, appended).
     """
     if not deliverable or not deliverable.strip():
         raise ValueError("lens_skip requires a non-empty deliverable key")
+    deliverable = deliverable.strip()
     cfg = resolve_config()
     if session and session != "unknown":
         gate_ts = latest_gate_ts(cfg.log_path, [session])
@@ -73,25 +92,21 @@ def skip_deliverable(
         )
         if pending is None:
             if skip_ts and gate_ts == skip_ts:
-                existing = latest_lens_skip_for_sessions(
-                    cfg.log_path, [session], since_iso=skip_ts
+                existing = _existing_skip_for_deliverable(
+                    cfg.log_path, session, deliverable, since_iso=skip_ts
                 )
                 if existing is not None:
                     return existing, str(cfg.log_path), False
             arm_ts = read_arm_ts(session)
-            if arm_ts and has_lens_skip_for_sessions(
-                cfg.log_path, [session], since_iso=arm_ts
-            ):
-                existing = latest_lens_skip_for_sessions(
-                    cfg.log_path, [session], since_iso=arm_ts
+            if arm_ts:
+                existing = _existing_skip_for_deliverable(
+                    cfg.log_path, session, deliverable, since_iso=arm_ts
                 )
                 if existing is not None:
                     return existing, str(cfg.log_path), False
-        elif has_lens_skip_for_sessions(
-            cfg.log_path, [session], since_iso=pending
-        ):
-            existing = latest_lens_skip_for_sessions(
-                cfg.log_path, [session], since_iso=pending
+        else:
+            existing = _existing_skip_for_deliverable(
+                cfg.log_path, session, deliverable, since_iso=pending
             )
             if existing is not None:
                 return existing, str(cfg.log_path), False

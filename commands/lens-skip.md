@@ -22,7 +22,7 @@ block message):
 
 ```bash
 PYTHONPATH="<plugin-root>/python" python3 -m lens_lib skip "<deliverable>" \
-  --session "<session id>" [--reason "<why held>"]
+  --session "<session id>" [--reason "<why held>"] [--workspace-root "<repo root>"]
 ```
 
 - `deliverable` is a stable key (reuse the same one the lens run would have used).

@@ -55,6 +55,7 @@ def cmd_skip(args: argparse.Namespace) -> int:
             session=args.session,
             reason=args.reason,
             host=args.host,
+            workspace_root=getattr(args, "workspace_root", None),
         )
     except Exception as e:
         print(f"lens-skip: {e}", file=sys.stderr)
@@ -266,6 +267,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     p_skip.add_argument("--reason", help="why the review was held")
     p_skip.add_argument("--host", choices=["claude-code", "cursor", "codex"])
+    p_skip.add_argument(
+        "--workspace-root",
+        help="workspace root for (workspace, conversation) side-channel key",
+    )
     p_skip.set_defaults(func=cmd_skip)
 
     p_app = sub.add_parser("append-run", help="append lens_run JSON")

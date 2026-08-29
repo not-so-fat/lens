@@ -34,7 +34,6 @@ from .log import (
     has_lens_run_for_sessions,
     has_lens_skip_for_sessions,
     latest_gate_ts,
-    latest_lens_run_ts,
     latest_lens_skip_ts,
 )
 from .paths import BUILTIN_IGNORE_GLOBS, filter_watched, load_lensignore
@@ -303,6 +302,8 @@ def run_check(
     elif wrote_watched and after_ts and real:
         # Cursor: writes existed but all fall at/before the latest gate satisfaction.
         skip_ts = latest_lens_skip_ts(cfg.log_path, real)
+        # Both strings are raw ts from the log; after_ts == skip_ts when skip
+        # (not run) is the latest gate satisfaction for this session.
         if skip_ts and skip_ts == after_ts:
             writes_declined = True
             gate = "declined"
