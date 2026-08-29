@@ -50,7 +50,7 @@ def cmd_skip(args: argparse.Namespace) -> int:
     from .skip import skip_deliverable
 
     try:
-        record, path = skip_deliverable(
+        record, path, appended = skip_deliverable(
             args.deliverable,
             session=args.session,
             reason=args.reason,
@@ -60,7 +60,13 @@ def cmd_skip(args: argparse.Namespace) -> int:
         print(f"lens-skip: {e}", file=sys.stderr)
         return 1
     print(json.dumps(record, ensure_ascii=False))
-    print(f"appended to {path}", file=sys.stderr)
+    if appended:
+        print(f"appended to {path}", file=sys.stderr)
+    else:
+        print(
+            "lens-skip: pending batch already satisfied; skipped append",
+            file=sys.stderr,
+        )
     return 0
 
 

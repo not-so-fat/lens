@@ -24,7 +24,14 @@ from lens_lib.config import (  # noqa: E402
     write_config,
 )
 from lens_lib.lens_parse import parse_lens_file  # noqa: E402
-from lens_lib.log import append_record, has_lens_run_since, parse_iso_ts  # noqa: E402
+from lens_lib.log import (  # noqa: E402
+    append_record,
+    has_lens_run_since,
+    latest_gate_ts,
+    latest_lens_run_ts,
+    latest_lens_skip_ts,
+    parse_iso_ts,
+)
 from lens_lib.paths import (  # noqa: E402
     filter_watched,
     load_lensignore,
@@ -915,6 +922,47 @@ class LensInvocationDetectionTests(unittest.TestCase):
 
         self.assertFalse(is_lens_invocation(None, ["yusuke"]))
         self.assertFalse(is_lens_invocation(["use", "lens"], ["yusuke"]))
+
+
+class LatestGateTsTests(unittest.TestCase):
+    def test_latest_gate_ts_prefers_later_run_or_skip(self):
+        with tempfile.TemporaryDirectory() as td:
+            log = Path(td) / "runs.jsonl"
+            append_record(
+                log,
+                {
+                    "ts": "2026-08-27T06:00:00Z",
+                    "event": "lens_run",
+                    "session": "s1",
+                    "lens": "review",
+                    "deliverable": "a",
+                    "rounds": 1,
+                    "verdict": "pass",
+                    "findings": [],
+                    "escalations": [],
+                },
+            )
+            append_record(
+                log,
+                {
+                    "ts": "2026-08-27T07:00:00Z",
+                    "event": "lens_skip",
+                    "session": "s1",
+                    "deliverable": "b",
+                },
+            )
+            self.assertEqual(
+                latest_gate_ts(log, ["s1"]),
+                "2026-08-27T07:00:00Z",
+            )
+            self.assertEqual(
+                latest_lens_run_ts(log, ["s1"]),
+                "2026-08-27T06:00:00Z",
+            )
+            self.assertEqual(
+                latest_lens_skip_ts(log, ["s1"]),
+                "2026-08-27T07:00:00Z",
+            )
 
 
 if __name__ == "__main__":

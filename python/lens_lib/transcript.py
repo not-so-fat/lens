@@ -236,7 +236,7 @@ def gather_writes(
         if not sc or sc in seen_files:
             continue
         seen_files.add(sc)
-        # Cursor: only count writes after the last session lens_run (I-7 light).
+        # Cursor: only count writes after the last session gate satisfaction.
         sc_paths, sc_first = load_sidechannel_writes(sc, after_ts=after_ts)
         paths.update(sc_paths)
         if sc_first and (side_first is None or sc_first < side_first):
