@@ -87,7 +87,7 @@ class ReleaseManifestTests(unittest.TestCase):
             text=True,
         ).stdout.strip()
         tagged = subprocess.run(
-            ["git", "rev-parse", tag],
+            ["git", "rev-parse", f"{tag}^{{commit}}"],
             cwd=ROOT,
             check=True,
             capture_output=True,
