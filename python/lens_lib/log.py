@@ -275,9 +275,9 @@ def latest_lens_skip_for_sessions(
 
 def is_duplicate_lens_run(
     log_path: Path, record: Dict[str, Any], *, window_seconds: int = 120
-) -> bool:
+) -> Optional[Dict[str, Any]]:
     """
-    True if a terminal lens_run with the same identity was already logged.
+    Return the existing lens_run when ``record`` duplicates one already logged.
 
     Guards the append path against a redundant re-log: a spurious gate re-block
     (e.g. an arming re-fire) can prompt the worker to append the *same* run again
@@ -288,15 +288,11 @@ def is_duplicate_lens_run(
     same deliverable/round are NOT duplicates.
     """
     if record.get("event") != "lens_run":
-        return False
-    if record.get("run_id"):
-        for rec in iter_records(log_path):
-            if rec.get("event") == "lens_run" and rec.get("run_id") == record.get("run_id"):
-                return True
+        return None
     deliverable = record.get("deliverable")
     rounds = record.get("rounds")
     if deliverable is None or rounds is None:
-        return False
+        return None
     new_ids = _lens_run_session_ids(record)
     new_ts = parse_iso_ts(str(record.get("ts") or ""))
     for rec in iter_records(log_path):
@@ -307,7 +303,7 @@ def is_duplicate_lens_run(
         prev_ids = _lens_run_session_ids(rec)
         if new_ids and prev_ids:
             if new_ids & prev_ids:
-                return True
+                return rec
             continue  # different session, same deliverable/round — not a dup
         if new_ids or prev_ids:
             # Exactly one side tagged — cannot equate sessions; not a dup.
@@ -318,8 +314,8 @@ def is_duplicate_lens_run(
         if new_ts is None or prev_ts is None:
             continue  # unparseable ts — do not over-dedup
         if abs((new_ts - prev_ts).total_seconds()) <= window_seconds:
-            return True
-    return False
+            return rec
+    return None
 
 
 def deliverable_has_lens_run(log_path: Path, deliverable: str) -> bool:

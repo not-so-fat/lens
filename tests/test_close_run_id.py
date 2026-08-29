@@ -3,11 +3,13 @@
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,7 +18,7 @@ sys.path.insert(0, str(ROOT / "python"))
 from lens_lib.close import close_deliverable  # noqa: E402
 from lens_lib.config import write_config  # noqa: E402
 from lens_lib.corrections import funnel_stats  # noqa: E402
-from lens_lib.log import append_record, new_run_id  # noqa: E402
+from lens_lib.log import append_record, get_lens_run_by_id, new_run_id  # noqa: E402
 from lens_lib.__main__ import main  # noqa: E402
 
 
@@ -224,6 +226,64 @@ Finish: re-sweep once after editing.
             lines = log.read_text(encoding="utf-8").strip().splitlines()
             rec = json.loads(lines[-1])
             self.assertTrue(rec.get("run_id", "").startswith("lr_"))
+        finally:
+            td.cleanup()
+            if old_home is None:
+                os.environ.pop("HOME", None)
+            else:
+                os.environ["HOME"] = old_home
+
+    def test_append_run_dedup_prints_stored_run_id(self):
+        td, home, lens, log, old_home = self._home()
+        try:
+            payload = {
+                "ts": "2026-08-29T09:00:00Z",
+                "lens": "yusuke",
+                "deliverable": "d-dedup",
+                "rounds": 1,
+                "verdict": "pass",
+                "findings": [],
+                "escalations": [],
+            }
+            rc = main(
+                [
+                    "append-run",
+                    "--host",
+                    "cursor",
+                    "--session",
+                    "sess-dedup",
+                    "--json",
+                    json.dumps(payload),
+                ]
+            )
+            self.assertEqual(rc, 0)
+            stored = json.loads(log.read_text(encoding="utf-8").strip().splitlines()[0])
+            stored_run_id = stored["run_id"]
+
+            payload["ts"] = "2026-08-29T09:01:00Z"
+            stderr = io.StringIO()
+            with redirect_stderr(stderr):
+                rc2 = main(
+                    [
+                        "append-run",
+                        "--host",
+                        "cursor",
+                        "--session",
+                        "sess-dedup",
+                        "--json",
+                        json.dumps(payload),
+                    ]
+                )
+            self.assertEqual(rc2, 0)
+            self.assertEqual(len(log.read_text(encoding="utf-8").strip().splitlines()), 1)
+            printed = [
+                line.split(":", 1)[1].strip()
+                for line in stderr.getvalue().splitlines()
+                if line.startswith("lens_run_id:")
+            ]
+            self.assertEqual(printed, [stored_run_id])
+            self.assertIsNotNone(get_lens_run_by_id(log, stored_run_id))
+            close_deliverable(None, 0, run_id=stored_run_id)
         finally:
             td.cleanup()
             if old_home is None:

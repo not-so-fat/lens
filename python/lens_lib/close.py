@@ -55,6 +55,7 @@ def close_deliverable(
 
     deliverable_key = str(run["deliverable"])
     attached_run_id = run.get("run_id")
+    # Legacy lens_run rows without run_id skip this guard; deliverable-only close still works.
     if attached_run_id and human_review_exists_for_run(cfg.log_path, str(attached_run_id)):
         raise ValueError(
             f"human_review already recorded for lens_run_id {attached_run_id!r}"

@@ -110,14 +110,16 @@ def cmd_append_run(args: argparse.Namespace) -> int:
         print("append-run: " + "; ".join(errors), file=sys.stderr)
         return 1
     cfg = resolve_config()
-    if is_duplicate_lens_run(cfg.log_path, record):
+    existing = is_duplicate_lens_run(cfg.log_path, record)
+    if existing is not None:
         print(str(cfg.log_path))
         print(
             "append-run: identical terminal lens_run already logged; skipped",
             file=sys.stderr,
         )
-        if record.get("run_id"):
-            print(f"lens_run_id: {record['run_id']}", file=sys.stderr)
+        stored_run_id = existing.get("run_id")
+        if stored_run_id:
+            print(f"lens_run_id: {stored_run_id}", file=sys.stderr)
         return 0
     path = append_record(cfg.log_path, record)
     print(path)
