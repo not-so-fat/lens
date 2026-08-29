@@ -849,6 +849,109 @@ class HookIntegrationTests(unittest.TestCase):
         out = json.loads(stop.stdout)
         self.assertNotIn("followup_message", out)
 
+    def test_cursor_second_write_after_lens_skip_still_enforces(self):
+        """NOT-41: skip must not clear later deliverables in the same session."""
+        _run_hook(
+            CURSOR_EDIT,
+            {
+                "file_path": str(self.deliverable),
+                "conversation_id": "multi-skip",
+                "workspace_roots": [str(self.td)],
+            },
+            self.env,
+        )
+        time.sleep(1.05)
+        with self.log.open("a", encoding="utf-8") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "ts": utc_now_iso(),
+                        "event": "lens_skip",
+                        "deliverable": "first",
+                        "session": "multi-skip",
+                    }
+                )
+                + "\n"
+            )
+        stop1 = _run_hook(
+            CURSOR_STOP,
+            {
+                "status": "completed",
+                "conversation_id": "multi-skip",
+                "workspace_roots": [str(self.td)],
+            },
+            self.env,
+        )
+        self.assertNotIn("followup_message", json.loads(stop1.stdout))
+        time.sleep(1.05)
+        other = self.td / "second.md"
+        other.write_text("y", encoding="utf-8")
+        _run_hook(
+            CURSOR_EDIT,
+            {
+                "file_path": str(other),
+                "conversation_id": "multi-skip",
+                "workspace_roots": [str(self.td)],
+            },
+            self.env,
+        )
+        stop2 = _run_hook(
+            CURSOR_STOP,
+            {
+                "status": "completed",
+                "conversation_id": "multi-skip",
+                "workspace_roots": [str(self.td)],
+            },
+            self.env,
+        )
+        out = json.loads(stop2.stdout)
+        self.assertIn("followup_message", out)
+        rec = json.loads(self.log.read_text(encoding="utf-8").strip().splitlines()[-1])
+        self.assertTrue(rec["blocked"])
+        self.assertFalse(rec.get("declined"))
+        self.assertEqual(rec.get("gate"), "none")
+
+    def test_cursor_repeat_lens_skip_is_idempotent(self):
+        """NOT-41: repeating skip without a new obligation must not append again."""
+        _run_hook(
+            CURSOR_EDIT,
+            {
+                "file_path": str(self.deliverable),
+                "conversation_id": "skip-dup",
+                "workspace_roots": [str(self.td)],
+            },
+            self.env,
+        )
+        time.sleep(1.05)
+        env = self.env.copy()
+        env["PYTHONPATH"] = str(PYTHON)
+        for _ in range(2):
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "lens_lib",
+                    "skip",
+                    "first",
+                    "--session",
+                    "skip-dup",
+                    "--host",
+                    "cursor",
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+                cwd=str(self.td),
+                check=False,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+        skips = [
+            json.loads(line)
+            for line in self.log.read_text(encoding="utf-8").splitlines()
+            if json.loads(line).get("event") == "lens_skip"
+        ]
+        self.assertEqual(len(skips), 1)
+
 
 class CursorSessionIdMismatchTests(unittest.TestCase):
     """Session-id divergence between afterFileEdit and stop."""

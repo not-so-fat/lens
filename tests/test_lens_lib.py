@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -24,7 +25,14 @@ from lens_lib.config import (  # noqa: E402
     write_config,
 )
 from lens_lib.lens_parse import parse_lens_file  # noqa: E402
-from lens_lib.log import append_record, has_lens_run_since, parse_iso_ts  # noqa: E402
+from lens_lib.log import (  # noqa: E402
+    append_record,
+    has_lens_run_since,
+    latest_gate_ts,
+    latest_lens_run_ts,
+    latest_lens_skip_ts,
+    parse_iso_ts,
+)
 from lens_lib.paths import (  # noqa: E402
     filter_watched,
     load_lensignore,
@@ -915,6 +923,99 @@ class LensInvocationDetectionTests(unittest.TestCase):
 
         self.assertFalse(is_lens_invocation(None, ["yusuke"]))
         self.assertFalse(is_lens_invocation(["use", "lens"], ["yusuke"]))
+
+
+class SkipIdempotencyTests(unittest.TestCase):
+    def test_distinct_deliverables_in_one_batch_both_log(self):
+        from lens_lib.skip import skip_deliverable
+
+        with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:
+            home = Path(td) / "home"
+            home.mkdir()
+            log = Path(td) / "runs.jsonl"
+            old_home = os.environ.get("HOME")
+            os.environ["HOME"] = str(home)
+            os.environ.pop("LENS_LOG_PATH", None)
+            try:
+                write_config(str(log), lenses={"review": str(Path(td) / "l.md")})
+                Path(td, "l.md").write_text(SAMPLE)
+                rec_a, _, appended_a = skip_deliverable(
+                    "deliverable-a",
+                    session="sess-multi",
+                    host="cursor",
+                    workspace_root=td,
+                )
+                self.assertTrue(appended_a)
+                rec_b, _, appended_b = skip_deliverable(
+                    "deliverable-b",
+                    session="sess-multi",
+                    host="cursor",
+                    workspace_root=td,
+                )
+                self.assertTrue(appended_b)
+                self.assertNotEqual(rec_a["deliverable"], rec_b["deliverable"])
+                skips = [
+                    json.loads(line)
+                    for line in log.read_text(encoding="utf-8").splitlines()
+                    if json.loads(line).get("event") == "lens_skip"
+                ]
+                self.assertEqual(len(skips), 2)
+                time.sleep(1.05)
+                rec_a2, _, appended_a2 = skip_deliverable(
+                    "deliverable-a",
+                    session="sess-multi",
+                    host="cursor",
+                    workspace_root=td,
+                )
+                self.assertFalse(appended_a2)
+                self.assertEqual(rec_a2["deliverable"], "deliverable-a")
+                self.assertEqual(len([l for l in log.read_text().splitlines() if l]), 2)
+            finally:
+                if old_home is None:
+                    os.environ.pop("HOME", None)
+                else:
+                    os.environ["HOME"] = old_home
+
+
+class LatestGateTsTests(unittest.TestCase):
+    def test_latest_gate_ts_prefers_later_run_or_skip(self):
+        with tempfile.TemporaryDirectory() as td:
+            log = Path(td) / "runs.jsonl"
+            append_record(
+                log,
+                {
+                    "ts": "2026-08-27T06:00:00Z",
+                    "event": "lens_run",
+                    "session": "s1",
+                    "lens": "review",
+                    "deliverable": "a",
+                    "rounds": 1,
+                    "verdict": "pass",
+                    "findings": [],
+                    "escalations": [],
+                },
+            )
+            append_record(
+                log,
+                {
+                    "ts": "2026-08-27T07:00:00Z",
+                    "event": "lens_skip",
+                    "session": "s1",
+                    "deliverable": "b",
+                },
+            )
+            self.assertEqual(
+                latest_gate_ts(log, ["s1"]),
+                "2026-08-27T07:00:00Z",
+            )
+            self.assertEqual(
+                latest_lens_run_ts(log, ["s1"]),
+                "2026-08-27T06:00:00Z",
+            )
+            self.assertEqual(
+                latest_lens_skip_ts(log, ["s1"]),
+                "2026-08-27T07:00:00Z",
+            )
 
 
 if __name__ == "__main__":

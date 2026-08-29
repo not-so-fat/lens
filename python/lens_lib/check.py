@@ -33,7 +33,8 @@ from .log import (
     append_record,
     has_lens_run_for_sessions,
     has_lens_skip_for_sessions,
-    latest_lens_run_ts,
+    latest_gate_ts,
+    latest_lens_skip_ts,
 )
 from .paths import BUILTIN_IGNORE_GLOBS, filter_watched, load_lensignore
 from .transcript import gather_writes, prune_sidechannel_file, session_id_from_transcript
@@ -245,10 +246,11 @@ def run_check(
     except OSError:
         pass
 
-    # Cursor: ignore side-channel writes already covered by a session lens_run.
+    # Cursor: ignore side-channel writes already covered by a session lens_run
+    # or lens_skip (NOT-41: skip must advance the freshness window too).
     after_ts = None
     if not transcript_path and real:
-        after_ts = latest_lens_run_ts(cfg.log_path, real)
+        after_ts = latest_gate_ts(cfg.log_path, real)
 
     # Routine files a repo/config marked non-deliverable never trip the write gate.
     ignore_globs = [
@@ -298,9 +300,16 @@ def run_check(
             writes_declined = True
             gate = "declined"
     elif wrote_watched and after_ts and real:
-        # Cursor: writes existed but all fall at/before the latest session lens_run.
-        lens_run_found = True
-        gate = "session"
+        # Cursor: writes existed but all fall at/before the latest gate satisfaction.
+        skip_ts = latest_lens_skip_ts(cfg.log_path, real)
+        # Both strings are raw ts from the log; after_ts == skip_ts when skip
+        # (not run) is the latest gate satisfaction for this session.
+        if skip_ts and skip_ts == after_ts:
+            writes_declined = True
+            gate = "declined"
+        else:
+            lens_run_found = True
+            gate = "session"
 
     unsatisfied_writes = watched_writes and not lens_run_found and not writes_declined
 
@@ -365,9 +374,9 @@ def run_check(
         for sid in real:
             disarm_session(sid)
 
-    # Prune consumed side-channel lines after a satisfying run (Cursor).
-    if lens_run_found and not transcript_path:
-        prune_at = latest_lens_run_ts(cfg.log_path, real) or first_ts
+    # Prune consumed side-channel lines after gate satisfaction (Cursor).
+    if (lens_run_found or writes_declined) and not transcript_path:
+        prune_at = latest_gate_ts(cfg.log_path, real) or first_ts
         for sc in side_paths:
             try:
                 prune_sidechannel_file(sc, after_ts=prune_at)

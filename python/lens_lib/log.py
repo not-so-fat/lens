@@ -162,10 +162,12 @@ def has_lens_skip_for_sessions(
     )
 
 
-def latest_lens_run_ts(
-    log_path: Path, session_ids: Optional[Sequence[str]] = None
+def _latest_event_ts(
+    log_path: Path,
+    event: str,
+    session_ids: Optional[Sequence[str]] = None,
 ) -> Optional[str]:
-    """Latest lens_run ts, optionally restricted to matching session ids."""
+    """Latest ts for ``event``, optionally restricted to matching session ids."""
     wanted = None
     if session_ids is not None:
         wanted = {str(s) for s in session_ids if s and s != "unknown"}
@@ -174,15 +176,10 @@ def latest_lens_run_ts(
     latest: Optional[datetime] = None
     latest_raw: Optional[str] = None
     for rec in iter_records(log_path):
-        if rec.get("event") != "lens_run":
+        if rec.get("event") != event:
             continue
         if wanted is not None:
-            rec_ids = set()
-            if rec.get("session"):
-                rec_ids.add(str(rec["session"]))
-            for sid in rec.get("session_ids") or []:
-                if sid:
-                    rec_ids.add(str(sid))
+            rec_ids = _lens_run_session_ids(rec)
             if not (rec_ids & wanted):
                 continue
         raw = str(rec.get("ts") or "")
@@ -193,6 +190,73 @@ def latest_lens_run_ts(
             latest = ts
             latest_raw = raw
     return latest_raw
+
+
+def latest_lens_run_ts(
+    log_path: Path, session_ids: Optional[Sequence[str]] = None
+) -> Optional[str]:
+    """Latest lens_run ts, optionally restricted to matching session ids."""
+    return _latest_event_ts(log_path, "lens_run", session_ids)
+
+
+def latest_lens_skip_ts(
+    log_path: Path, session_ids: Optional[Sequence[str]] = None
+) -> Optional[str]:
+    """Latest lens_skip ts, optionally restricted to matching session ids."""
+    return _latest_event_ts(log_path, "lens_skip", session_ids)
+
+
+def latest_gate_ts(
+    log_path: Path, session_ids: Optional[Sequence[str]] = None
+) -> Optional[str]:
+    """Latest gate-satisfying ts (lens_run or lens_skip) for session ids."""
+    run_ts = latest_lens_run_ts(log_path, session_ids)
+    skip_ts = latest_lens_skip_ts(log_path, session_ids)
+    if run_ts is None:
+        return skip_ts
+    if skip_ts is None:
+        return run_ts
+    run_dt = parse_iso_ts(run_ts)
+    skip_dt = parse_iso_ts(skip_ts)
+    if run_dt is None:
+        return skip_ts
+    if skip_dt is None:
+        return run_ts
+    return run_ts if run_dt >= skip_dt else skip_ts
+
+
+def latest_lens_skip_for_sessions(
+    log_path: Path,
+    session_ids: Sequence[str],
+    *,
+    since_iso: Optional[str] = None,
+    deliverable: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Most recent lens_skip for session ids (by ts), optionally since since_iso."""
+    wanted = {str(s) for s in session_ids if s and s != "unknown"}
+    if not wanted:
+        return None
+    since = parse_iso_ts(since_iso) if since_iso else None
+    latest: Optional[datetime] = None
+    latest_rec: Optional[Dict[str, Any]] = None
+    for rec in iter_records(log_path):
+        if rec.get("event") != "lens_skip":
+            continue
+        if deliverable is not None and rec.get("deliverable") != deliverable:
+            continue
+        rec_ids = _lens_run_session_ids(rec)
+        if not (rec_ids & wanted):
+            continue
+        raw = str(rec.get("ts") or "")
+        ts = parse_iso_ts(raw)
+        if ts is None:
+            continue
+        if since is not None and ts < since:
+            continue
+        if latest is None or ts > latest:
+            latest = ts
+            latest_rec = rec
+    return latest_rec
 
 
 def is_duplicate_lens_run(
