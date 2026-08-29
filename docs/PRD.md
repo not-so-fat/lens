@@ -241,6 +241,7 @@ All schemas are JSON Schema Draft 2020-12. Contracts directory in the plugin rep
   "properties": {
     "ts": { "type": "string", "format": "date-time" },
     "event": { "const": "lens_run" },
+    "run_id": { "type": "string", "pattern": "^lr_[a-f0-9]+$", "description": "stable id assigned at append time" },
     "lens": { "type": "string", "description": "configured lens name used for this run" },
     "deliverable": { "type": "string", "minLength": 1 },
     "rounds": { "type": "integer", "minimum": 1 },
@@ -285,6 +286,8 @@ All schemas are JSON Schema Draft 2020-12. Contracts directory in the plugin rep
     "ts": { "type": "string", "format": "date-time" },
     "event": { "const": "human_review" },
     "deliverable": { "type": "string", "minLength": 1 },
+    "lens_run_id": { "type": "string", "pattern": "^lr_[a-f0-9]+$", "description": "terminal lens_run this review closes" },
+    "lens_run_ts": { "type": "string", "format": "date-time" },
     "corrections": { "type": "integer", "minimum": 0 },
     "misses": { "type": "array", "items": { "$ref": "#/$defs/tagged_note" } },
     "noise": { "type": "array", "items": { "$ref": "#/$defs/tagged_note" } }

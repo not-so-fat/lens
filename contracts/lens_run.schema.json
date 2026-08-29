@@ -6,6 +6,11 @@
   "properties": {
     "ts": { "type": "string", "format": "date-time" },
     "event": { "const": "lens_run" },
+    "run_id": {
+      "type": "string",
+      "pattern": "^lr_[a-f0-9]+$",
+      "description": "stable id assigned at append time; required on new terminal runs"
+    },
     "lens": {
       "type": "string",
       "description": "configured lens name used for this run"

@@ -22,6 +22,11 @@
     "check": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
     "kind": { "enum": ["miss", "noise"] },
     "note": { "type": "string", "minLength": 1 },
+    "lens_run_id": {
+      "type": "string",
+      "pattern": "^lr_[a-f0-9]+$",
+      "description": "terminal lens_run the signal attributes to"
+    },
     "lens_run_ts": { "type": "string", "format": "date-time" },
     "status": { "enum": ["open", "actioned", "discarded"] },
     "linked_patch_id": { "type": ["string", "null"] }

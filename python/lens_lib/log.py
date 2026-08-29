@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import secrets
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Sequence
@@ -11,6 +12,7 @@ from typing import Any, Dict, Iterator, List, Optional, Sequence
 from .util import utc_now_iso
 
 CHECK_SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+RUN_ID_RE = re.compile(r"^lr_[a-f0-9]+$")
 FINDING_KEYS = frozenset(
     {"round", "check", "target", "severity", "reaction", "note", "class"}
 )
@@ -18,6 +20,18 @@ VALID_VERDICTS = frozenset({"pass", "escalated", "held"})
 VALID_REACTIONS = frozenset(
     {"fixed", "fixed-class", "disputed", "escalated", "pending-owner"}
 )
+
+
+class AmbiguousCloseError(ValueError):
+    """Deliverable-only close matched more than one lens_run."""
+
+    def __init__(self, message: str, candidates: List[Dict[str, Any]]) -> None:
+        super().__init__(message)
+        self.candidates = candidates
+
+
+def new_run_id() -> str:
+    return f"lr_{secrets.token_hex(8)}"
 
 
 def ensure_log(log_path: Path) -> Path:
@@ -261,9 +275,9 @@ def latest_lens_skip_for_sessions(
 
 def is_duplicate_lens_run(
     log_path: Path, record: Dict[str, Any], *, window_seconds: int = 120
-) -> bool:
+) -> Optional[Dict[str, Any]]:
     """
-    True if a terminal lens_run with the same identity was already logged.
+    Return the existing lens_run when ``record`` duplicates one already logged.
 
     Guards the append path against a redundant re-log: a spurious gate re-block
     (e.g. an arming re-fire) can prompt the worker to append the *same* run again
@@ -274,11 +288,11 @@ def is_duplicate_lens_run(
     same deliverable/round are NOT duplicates.
     """
     if record.get("event") != "lens_run":
-        return False
+        return None
     deliverable = record.get("deliverable")
     rounds = record.get("rounds")
     if deliverable is None or rounds is None:
-        return False
+        return None
     new_ids = _lens_run_session_ids(record)
     new_ts = parse_iso_ts(str(record.get("ts") or ""))
     for rec in iter_records(log_path):
@@ -289,7 +303,7 @@ def is_duplicate_lens_run(
         prev_ids = _lens_run_session_ids(rec)
         if new_ids and prev_ids:
             if new_ids & prev_ids:
-                return True
+                return rec
             continue  # different session, same deliverable/round — not a dup
         if new_ids or prev_ids:
             # Exactly one side tagged — cannot equate sessions; not a dup.
@@ -300,8 +314,8 @@ def is_duplicate_lens_run(
         if new_ts is None or prev_ts is None:
             continue  # unparseable ts — do not over-dedup
         if abs((new_ts - prev_ts).total_seconds()) <= window_seconds:
-            return True
-    return False
+            return rec
+    return None
 
 
 def deliverable_has_lens_run(log_path: Path, deliverable: str) -> bool:
@@ -315,18 +329,104 @@ def latest_lens_run_for_deliverable(
     log_path: Path, deliverable: str
 ) -> Optional[Dict[str, Any]]:
     """Most recent lens_run for a deliverable key (by ts)."""
-    latest: Optional[datetime] = None
-    latest_rec: Optional[Dict[str, Any]] = None
+    runs = list_lens_runs_for_deliverable(log_path, deliverable)
+    return runs[0] if runs else None
+
+
+def get_lens_run_by_id(log_path: Path, run_id: str) -> Optional[Dict[str, Any]]:
+    for rec in iter_records(log_path):
+        if rec.get("event") == "lens_run" and rec.get("run_id") == run_id:
+            return rec
+    return None
+
+
+def list_lens_runs_for_deliverable(
+    log_path: Path, deliverable: str
+) -> List[Dict[str, Any]]:
+    """All lens_run rows for a deliverable, newest first."""
+    runs: List[Dict[str, Any]] = []
     for rec in iter_records(log_path):
         if rec.get("event") != "lens_run" or rec.get("deliverable") != deliverable:
             continue
+        runs.append(rec)
+
+    def sort_key(rec: Dict[str, Any]) -> datetime:
         ts = parse_iso_ts(str(rec.get("ts") or ""))
         if ts is None:
+            return datetime.min.replace(tzinfo=timezone.utc)
+        return ts
+
+    runs.sort(key=sort_key, reverse=True)
+    return runs
+
+
+def human_review_exists_for_run(log_path: Path, run_id: str) -> bool:
+    for rec in iter_records(log_path):
+        if rec.get("event") != "human_review":
             continue
-        if latest is None or ts > latest:
-            latest = ts
-            latest_rec = rec
-    return latest_rec
+        if rec.get("lens_run_id") == run_id:
+            return True
+    return False
+
+
+def format_run_candidate(rec: Dict[str, Any]) -> str:
+    run_id = rec.get("run_id") or "(legacy:no run_id)"
+    lens = rec.get("lens", "?")
+    ts = rec.get("ts", "?")
+    verdict = rec.get("verdict", "?")
+    session = rec.get("session") or ",".join(rec.get("session_ids") or []) or "?"
+    return f"{run_id}\tlens={lens}\tts={ts}\tverdict={verdict}\tsession={session}"
+
+
+def resolve_lens_run_for_close(
+    log_path: Path,
+    *,
+    deliverable: Optional[str] = None,
+    run_id: Optional[str] = None,
+    lens: Optional[str] = None,
+    session: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Pick the lens_run a human_review closes. Refuse ambiguous deliverable-only."""
+    if run_id:
+        run = get_lens_run_by_id(log_path, run_id)
+        if not run:
+            raise ValueError(f"unknown lens_run_id {run_id!r}")
+        if deliverable and run.get("deliverable") != deliverable:
+            raise ValueError(
+                f"lens_run_id {run_id!r} is for deliverable {run.get('deliverable')!r}, "
+                f"not {deliverable!r}"
+            )
+        return run
+
+    if not deliverable:
+        raise ValueError("deliverable or --run-id required")
+
+    runs = list_lens_runs_for_deliverable(log_path, deliverable)
+    if not runs:
+        raise ValueError(f"no lens_run for deliverable {deliverable!r}")
+
+    if lens or session:
+        filtered: List[Dict[str, Any]] = []
+        for rec in runs:
+            if lens and rec.get("lens") != lens:
+                continue
+            if session:
+                ids = _lens_run_session_ids(rec)
+                if session not in ids:
+                    continue
+            filtered.append(rec)
+        runs = filtered
+        if not runs:
+            raise ValueError("no lens_run matches --lens / --session filter")
+
+    if len(runs) == 1:
+        return runs[0]
+
+    raise AmbiguousCloseError(
+        f"deliverable {deliverable!r} has {len(runs)} lens_run candidates; "
+        "pass --run-id (see: python -m lens_lib runs list --deliverable …)",
+        runs,
+    )
 
 
 def validate_lens_skip_shape(record: Dict[str, Any]) -> List[str]:
@@ -364,6 +464,26 @@ def validate_lens_run_shape(record: Dict[str, Any]) -> List[str]:
         errors.append("event must be lens_run")
     if record.get("verdict") not in VALID_VERDICTS:
         errors.append("verdict must be pass|escalated|held")
+    run_id = record.get("run_id")
+    if run_id is not None and not RUN_ID_RE.match(str(run_id)):
+        errors.append("bad run_id")
+    allowed = {
+        "ts",
+        "event",
+        "run_id",
+        "lens",
+        "deliverable",
+        "rounds",
+        "verdict",
+        "host",
+        "session",
+        "session_ids",
+        "findings",
+        "escalations",
+    }
+    extra = set(record.keys()) - allowed
+    if extra:
+        errors.append(f"unknown keys: {sorted(extra)}")
     findings = record.get("findings")
     if not isinstance(findings, list):
         errors.append("findings must be array")

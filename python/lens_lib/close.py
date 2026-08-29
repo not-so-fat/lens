@@ -7,7 +7,13 @@ from typing import List, Optional, Tuple
 
 from .config import resolve_config
 from .corrections import capture_from_human_review
-from .log import append_record, deliverable_has_lens_run
+from .log import (
+    AmbiguousCloseError,
+    append_record,
+    format_run_candidate,
+    human_review_exists_for_run,
+    resolve_lens_run_for_close,
+)
 from .util import utc_now_iso
 
 TAGGED_RE = re.compile(r"^([a-z0-9]+(?:-[a-z0-9]+)*)\s*:\s*(.+)$")
@@ -24,22 +30,47 @@ def parse_tagged(items: List[str]) -> List[dict]:
 
 
 def close_deliverable(
-    deliverable: str,
+    deliverable: Optional[str],
     corrections: int,
+    *,
+    run_id: Optional[str] = None,
+    lens: Optional[str] = None,
+    session: Optional[str] = None,
     misses: Optional[List[str]] = None,
     noise: Optional[List[str]] = None,
 ) -> Tuple[dict, str, List[dict]]:
     cfg = resolve_config()
-    if not deliverable_has_lens_run(cfg.log_path, deliverable):
-        raise ValueError(
-            f"no lens_run for deliverable {deliverable!r}; refuse human_review"
+    try:
+        run = resolve_lens_run_for_close(
+            cfg.log_path,
+            deliverable=deliverable,
+            run_id=run_id,
+            lens=lens,
+            session=session,
         )
+    except AmbiguousCloseError as e:
+        lines = [str(e), "candidates:"]
+        lines.extend(format_run_candidate(c) for c in e.candidates)
+        raise ValueError("\n".join(lines)) from e
+
+    deliverable_key = str(run["deliverable"])
+    attached_run_id = run.get("run_id")
+    # Legacy lens_run rows without run_id skip this guard; deliverable-only close still works.
+    if attached_run_id and human_review_exists_for_run(cfg.log_path, str(attached_run_id)):
+        raise ValueError(
+            f"human_review already recorded for lens_run_id {attached_run_id!r}"
+        )
+
     record: dict = {
         "ts": utc_now_iso(),
         "event": "human_review",
-        "deliverable": deliverable,
+        "deliverable": deliverable_key,
         "corrections": int(corrections),
     }
+    if attached_run_id:
+        record["lens_run_id"] = attached_run_id
+    if run.get("ts"):
+        record["lens_run_ts"] = run["ts"]
     if misses:
         record["misses"] = parse_tagged(misses)
     if noise:
@@ -48,9 +79,8 @@ def close_deliverable(
     signals = []
     if record.get("misses") or record.get("noise"):
         signals = capture_from_human_review(
-            deliverable=deliverable,
+            run=run,
             misses=record.get("misses"),
             noise=record.get("noise"),
-            log_path=cfg.log_path,
         )
     return record, str(path), signals

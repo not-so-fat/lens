@@ -32,6 +32,9 @@ def cmd_close(args: argparse.Namespace) -> int:
         record, path, signals = close_deliverable(
             args.deliverable,
             args.corrections,
+            run_id=args.run_id,
+            lens=args.lens,
+            session=args.session,
             misses=args.miss or None,
             noise=args.noise or None,
         )
@@ -43,6 +46,20 @@ def cmd_close(args: argparse.Namespace) -> int:
     if signals:
         ids = ", ".join(s["id"] for s in signals)
         print(f"correction signals: {ids}", file=sys.stderr)
+    return 0
+
+
+def cmd_runs_list(args: argparse.Namespace) -> int:
+    from .config import resolve_config
+    from .log import format_run_candidate, list_lens_runs_for_deliverable
+
+    cfg = resolve_config()
+    runs = list_lens_runs_for_deliverable(cfg.log_path, args.deliverable)
+    if not runs:
+        print(f"no lens_run for deliverable {args.deliverable!r}", file=sys.stderr)
+        return 1
+    for rec in runs:
+        print(format_run_candidate(rec))
     return 0
 
 
@@ -73,7 +90,7 @@ def cmd_skip(args: argparse.Namespace) -> int:
 
 def cmd_append_run(args: argparse.Namespace) -> int:
     from .config import resolve_config
-    from .log import append_record, is_duplicate_lens_run, validate_lens_run_shape
+    from .log import append_record, is_duplicate_lens_run, new_run_id, validate_lens_run_shape
 
     raw = args.json or sys.stdin.read()
     try:
@@ -82,6 +99,8 @@ def cmd_append_run(args: argparse.Namespace) -> int:
         print(f"append-run: invalid JSON: {e}", file=sys.stderr)
         return 1
     record["event"] = "lens_run"
+    if not record.get("run_id"):
+        record["run_id"] = new_run_id()
     if args.host:
         record["host"] = args.host
     if getattr(args, "session", None):
@@ -91,15 +110,20 @@ def cmd_append_run(args: argparse.Namespace) -> int:
         print("append-run: " + "; ".join(errors), file=sys.stderr)
         return 1
     cfg = resolve_config()
-    if is_duplicate_lens_run(cfg.log_path, record):
+    existing = is_duplicate_lens_run(cfg.log_path, record)
+    if existing is not None:
         print(str(cfg.log_path))
         print(
             "append-run: identical terminal lens_run already logged; skipped",
             file=sys.stderr,
         )
+        stored_run_id = existing.get("run_id")
+        if stored_run_id:
+            print(f"lens_run_id: {stored_run_id}", file=sys.stderr)
         return 0
     path = append_record(cfg.log_path, record)
     print(path)
+    print(f"lens_run_id: {record['run_id']}", file=sys.stderr)
     return 0
 
 
@@ -228,6 +252,13 @@ def cmd_corrections_propose(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_corrections_funnel(_: argparse.Namespace) -> int:
+    from .corrections import funnel_stats
+
+    print(json.dumps(funnel_stats(), ensure_ascii=False, indent=2))
+    return 0
+
+
 def cmd_corrections_apply(args: argparse.Namespace) -> int:
     from .corrections import apply_patch
 
@@ -253,11 +284,27 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_doc.set_defaults(func=cmd_doctor)
 
     p_close = sub.add_parser("close", help="append human_review")
-    p_close.add_argument("deliverable")
+    p_close.add_argument(
+        "deliverable",
+        nargs="?",
+        help="deliverable key (optional when --run-id is set)",
+    )
     p_close.add_argument("--corrections", type=int, required=True)
+    p_close.add_argument(
+        "--run-id",
+        help="terminal lens_run id from append stderr (lr_…); required when ambiguous",
+    )
+    p_close.add_argument("--lens", help="disambiguate deliverable-only close")
+    p_close.add_argument("--session", help="disambiguate deliverable-only close")
     p_close.add_argument("--miss", action="append", default=[])
     p_close.add_argument("--noise", action="append", default=[])
     p_close.set_defaults(func=cmd_close)
+
+    p_runs = sub.add_parser("runs", help="inspect lens_run rows")
+    runs_sub = p_runs.add_subparsers(dest="runs_cmd", required=True)
+    p_runs_list = runs_sub.add_parser("list", help="list runs for a deliverable")
+    p_runs_list.add_argument("--deliverable", required=True)
+    p_runs_list.set_defaults(func=cmd_runs_list)
 
     p_skip = sub.add_parser("skip", help="append lens_skip (owner deliberately held)")
     p_skip.add_argument("deliverable")
@@ -337,6 +384,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_ca = corr_sub.add_parser("apply", help="apply proposed patch to lens file")
     p_ca.add_argument("patch_id", help="lp_…")
     p_ca.set_defaults(func=cmd_corrections_apply)
+
+    p_cf = corr_sub.add_parser("funnel", help="correction flywheel counts")
+    p_cf.set_defaults(func=cmd_corrections_funnel)
 
     args = parser.parse_args(argv)
     return args.func(args)

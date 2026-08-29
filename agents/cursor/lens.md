@@ -70,6 +70,8 @@ The worker must append it via the append launcher (a bare `python3 <path>`, cwd-
 
 `python3 "${CURSOR_PLUGIN_ROOT}/python/lens_append.py" --host cursor --session '<id>' --json '...'`
 
+The launcher assigns a stable `run_id` and prints `lens_run_id: lr_…` on stderr — use it for owner review close (see Owner review handoff).
+
 - `"lens"` is the **name** (not the file path).
 - `"session"` must be this chat's conversation/session id (Cursor stop has no transcript window without it as a backup).
 - Prior rounds' findings and the worker's stated reaction to each come from the worker's prompt — include them all in `findings` with their round numbers and every logged field (`class` must round-trip).
@@ -93,3 +95,10 @@ Return to the worker, in this order:
 <!-- SHARED:reply END -->
 
 5. If terminal: the `LENS_LOG_APPEND:` line.
+
+<!-- SHARED:owner_review START -->
+**Owner review handoff** — after the worker appends the terminal `lens_run`, offer the lens owner a one-line close when they finish reading the deliverable. Read `lens_run_id` from the append launcher stderr (`lens_run_id: lr_…`). Do not infer miss/noise from edits alone.
+   - No corrections: `python3 -m lens_lib close --run-id <lr_…> --corrections 0` (or `/lens-close --run-id <lr_…> corrections=0`).
+   - With misses/noise: add `--miss "check:note"` / `--noise "check:note"` (kebab-case check slug).
+   Skip if a `human_review` for that `lens_run_id` already exists.
+<!-- SHARED:owner_review END -->

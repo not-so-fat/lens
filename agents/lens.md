@@ -71,7 +71,7 @@ Only on a terminal round, append ONE line covering the whole run to `log_path`:
   - `wait-for-go`: log with `verdict: "held"`; this round's FIX findings get `reaction: "pending-owner"`.
 - Prefer appending via the append launcher (injects/validates shape) — run it verbatim, as a bare `python3 <path>` with no leading `PYTHONPATH=` so it stays pre-granted in a background subagent:  
   `python3 "${CLAUDE_PLUGIN_ROOT}/python/lens_append.py" --host claude-code --session '<session_id>' --json '...'`  
-  Bash append is allowed but must include `"session"` when known; untagged runs still satisfy the gate if `ts` is in-window, but runs tagged for another session never do.
+  The launcher assigns a stable `run_id` and prints `lens_run_id: lr_…` on stderr — use it for owner review close (see Owner review handoff).
 - `ts` must come from `date -u +%Y-%m-%dT%H:%M:%SZ` — never estimated.
 - Always include `"host": "claude-code"`.
 - Either `verdict: "pass"`, `"escalated"`, or `"held"` is a terminal `lens_run` and satisfies the Stop-hook gate (`held` ≠ pass; analytics stay honest).
@@ -86,3 +86,10 @@ Return to the worker, in this order:
 3. If FIX and `hold_policy` is `auto-apply` or absent: for findings with `class`, require a class-wide sweep (all comparable elements, not just the flagged instance). Worker returns with the same deliverable key, the next round number, reaction per finding (`fixed-class` when they swept the class), and **prior_findings including every logged field** (`class` must round-trip).
 4. If FIX and `hold_policy=wait-for-go`: this round is terminal — log with `verdict: "held"` (see Logging); worker waits for owner "apply" or "hold" before round 2.
 <!-- SHARED:reply END -->
+
+<!-- SHARED:owner_review START -->
+**Owner review handoff** — after the worker appends the terminal `lens_run`, offer the lens owner a one-line close when they finish reading the deliverable. Read `lens_run_id` from the append launcher stderr (`lens_run_id: lr_…`). Do not infer miss/noise from edits alone.
+   - No corrections: `python3 -m lens_lib close --run-id <lr_…> --corrections 0` (or `/lens-close --run-id <lr_…> corrections=0`).
+   - With misses/noise: add `--miss "check:note"` / `--noise "check:note"` (kebab-case check slug).
+   Skip if a `human_review` for that `lens_run_id` already exists.
+<!-- SHARED:owner_review END -->
