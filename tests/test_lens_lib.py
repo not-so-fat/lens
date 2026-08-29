@@ -41,6 +41,7 @@ from lens_lib.paths import (  # noqa: E402
 )
 from lens_lib.log import has_lens_run_for_sessions  # noqa: E402
 from lens_lib.transcript import first_event_ts, written_paths_from_transcript  # noqa: E402
+from lens_lib.util import utc_now_iso  # noqa: E402
 
 SAMPLE = """---
 title: t
@@ -368,6 +369,11 @@ class PreReleaseFootgunTests(unittest.TestCase):
             )
             self.assertTrue(has_lens_run_since(log, "2026-08-01T10:00:05+00:00"))
             self.assertIsNotNone(parse_iso_ts("2026-08-01T10:00:05.500Z"))
+
+    def test_utc_now_iso_has_millisecond_resolution(self):
+        ts = utc_now_iso()
+        self.assertRegex(ts, r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$")
+        self.assertIsNotNone(parse_iso_ts(ts))
 
     def test_first_event_ts_skips_junk_banner(self):
         with tempfile.TemporaryDirectory() as td:
