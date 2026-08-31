@@ -6,6 +6,11 @@
   "properties": {
     "ts": { "type": "string", "format": "date-time" },
     "event": { "const": "human_review" },
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "record schema version; absent on rows written before NOT-39 = legacy"
+    },
     "deliverable": { "type": "string", "minLength": 1 },
     "lens_run_id": {
       "type": "string",

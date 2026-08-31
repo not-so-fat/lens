@@ -1,0 +1,3 @@
+{"ts":"2026-08-04T15:21:05.623887Z","session":"892a5931-7a5c-4971-8615-f52a8595c71a","deliverable":"transcript-distillation","round":1,"lens":"default_lens","verdict":"CORRECT","findings":[],"summary":"Distillation verdict SKIP is correct — analyzed session contained no durable knowledge."}
+{"ts":"2026-08-04T15:21:18.452441Z","event":"lens_run","lens":"default","deliverable":"sample-doc","rounds":1,"verdict":"pass","findings":[],"escalations":[]}
+{"ts":"2026-08-04T15:22:15.605899Z","event":"lens_run","lens":"default_lens","deliverable":"sample-doc-2","rounds":2,"verdict":"pass","findings":[],"escalations":[],"run_id":"lr_deadbeef01234567"}
