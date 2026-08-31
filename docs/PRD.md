@@ -241,6 +241,7 @@ All schemas are JSON Schema Draft 2020-12. Contracts directory in the plugin rep
   "properties": {
     "ts": { "type": "string", "format": "date-time" },
     "event": { "const": "lens_run" },
+    "schema_version": { "type": "integer", "minimum": 1, "description": "record schema version; absent on legacy rows (normalize on read)" },
     "run_id": { "type": "string", "pattern": "^lr_[a-f0-9]+$", "description": "stable id assigned at append time" },
     "lens": { "type": "string", "description": "configured lens name used for this run" },
     "deliverable": { "type": "string", "minLength": 1 },
@@ -274,6 +275,8 @@ All schemas are JSON Schema Draft 2020-12. Contracts directory in the plugin rep
 }
 ```
 
+**Read normalization (NOT-39):** append-only source is never rewritten. `python/lens_lib/log.py` `normalize_record` / `iter_records` map legacy rows at read time: missing `event` + lens_run shape → `event: lens_run`; `verdict: CORRECT` → `pass`; `lens: default` → `default_lens`; singular `round` → `rounds`; default empty `escalations` / `findings`; absent `host` on `lens_run` / `hook_check` → `claude-code`. New appends stamp `schema_version: 1`.
+
 ### 7.2 `human_review` record
 
 ```json
@@ -285,6 +288,7 @@ All schemas are JSON Schema Draft 2020-12. Contracts directory in the plugin rep
   "properties": {
     "ts": { "type": "string", "format": "date-time" },
     "event": { "const": "human_review" },
+    "schema_version": { "type": "integer", "minimum": 1, "description": "record schema version; absent on legacy rows" },
     "deliverable": { "type": "string", "minLength": 1 },
     "lens_run_id": { "type": "string", "pattern": "^lr_[a-f0-9]+$", "description": "terminal lens_run this review closes" },
     "lens_run_ts": { "type": "string", "format": "date-time" },
@@ -320,6 +324,7 @@ The loop's **second exit** (F3.1): the owner deliberately held a review for a de
   "properties": {
     "ts": { "type": "string", "format": "date-time" },
     "event": { "const": "lens_skip" },
+    "schema_version": { "type": "integer", "minimum": 1, "description": "record schema version; absent on legacy rows" },
     "deliverable": { "type": "string", "minLength": 1 },
     "session": { "type": "string", "description": "session id whose gate this clears; omit only on Claude Bash appends" },
     "session_ids": { "type": "array", "items": { "type": "string" } },

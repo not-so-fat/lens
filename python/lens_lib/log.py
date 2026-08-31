@@ -20,6 +20,9 @@ VALID_VERDICTS = frozenset({"pass", "escalated", "held"})
 VALID_REACTIONS = frozenset(
     {"fixed", "fixed-class", "disputed", "escalated", "pending-owner"}
 )
+CURRENT_SCHEMA_VERSION = 1
+LEGACY_VERDICT_MAP = {"CORRECT": "pass"}
+LEGACY_LENS_MAP = {"default": "default_lens"}
 
 
 class AmbiguousCloseError(ValueError):
@@ -41,10 +44,54 @@ def ensure_log(log_path: Path) -> Path:
     return log_path
 
 
+def _looks_like_lens_run(rec: Dict[str, Any]) -> bool:
+    if rec.get("event") is not None:
+        return rec.get("event") == "lens_run"
+    return (
+        "deliverable" in rec
+        and ("verdict" in rec or "rounds" in rec or "round" in rec)
+    )
+
+
+def normalize_record(rec: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Return a read-normalized copy of a log row.
+
+    Legacy rows stay append-only on disk; consumers use this at read time so
+    analytics and gate code see a single canonical shape.
+    """
+    out = dict(rec)
+    if "event" not in out and _looks_like_lens_run(out):
+        out["event"] = "lens_run"
+
+    event = out.get("event")
+    if event == "lens_run":
+        verdict = out.get("verdict")
+        if isinstance(verdict, str) and verdict in LEGACY_VERDICT_MAP:
+            out["verdict"] = LEGACY_VERDICT_MAP[verdict]
+        lens = out.get("lens")
+        if isinstance(lens, str) and lens in LEGACY_LENS_MAP:
+            out["lens"] = LEGACY_LENS_MAP[lens]
+        if "rounds" not in out and "round" in out:
+            out["rounds"] = out["round"]
+        if "escalations" not in out:
+            out["escalations"] = []
+        if "findings" not in out:
+            out["findings"] = []
+        if "host" not in out:
+            out["host"] = "claude-code"
+    elif event == "hook_check" and "host" not in out:
+        out["host"] = "claude-code"
+
+    return out
+
+
 def append_record(log_path: Path, record: Dict[str, Any]) -> Path:
-    """Append one complete JSONL line. Adds ts if missing."""
+    """Append one complete JSONL line. Adds ts and schema_version if missing."""
     if "ts" not in record:
         record = {**record, "ts": utc_now_iso()}
+    if "schema_version" not in record:
+        record = {**record, "schema_version": CURRENT_SCHEMA_VERSION}
     path = ensure_log(log_path)
     line = json.dumps(record, separators=(",", ":"), ensure_ascii=False)
     with path.open("a", encoding="utf-8") as f:
@@ -60,7 +107,7 @@ def iter_records(log_path: Path) -> Iterator[Dict[str, Any]]:
             line = line.strip()
             if not line:
                 continue
-            yield json.loads(line)
+            yield normalize_record(json.loads(line))
 
 
 def parse_iso_ts(value: str) -> Optional[datetime]:
@@ -470,6 +517,7 @@ def validate_lens_run_shape(record: Dict[str, Any]) -> List[str]:
     allowed = {
         "ts",
         "event",
+        "schema_version",
         "run_id",
         "lens",
         "deliverable",
