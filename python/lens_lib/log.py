@@ -21,6 +21,7 @@ VALID_REACTIONS = frozenset(
     {"fixed", "fixed-class", "disputed", "escalated", "pending-owner"}
 )
 CURRENT_SCHEMA_VERSION = 1
+# Owner log audit (through 2026-08-29): CORRECT was the only non-canonical verdict.
 LEGACY_VERDICT_MAP = {"CORRECT": "pass"}
 LEGACY_LENS_MAP = {"default": "default_lens"}
 
@@ -73,7 +74,7 @@ def normalize_record(rec: Dict[str, Any]) -> Dict[str, Any]:
         if isinstance(lens, str) and lens in LEGACY_LENS_MAP:
             out["lens"] = LEGACY_LENS_MAP[lens]
         if "rounds" not in out and "round" in out:
-            out["rounds"] = out["round"]
+            out["rounds"] = out.pop("round")
         if "escalations" not in out:
             out["escalations"] = []
         if "findings" not in out:
@@ -485,7 +486,16 @@ def validate_lens_skip_shape(record: Dict[str, Any]) -> List[str]:
         errors.append("event must be lens_skip")
     if not str(record.get("deliverable") or "").strip():
         errors.append("deliverable must be non-empty")
-    allowed = {"ts", "event", "deliverable", "session", "session_ids", "reason", "host"}
+    allowed = {
+        "ts",
+        "event",
+        "schema_version",
+        "deliverable",
+        "session",
+        "session_ids",
+        "reason",
+        "host",
+    }
     extra = set(record.keys()) - allowed
     if extra:
         errors.append(f"unknown keys: {sorted(extra)}")

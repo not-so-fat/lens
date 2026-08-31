@@ -275,7 +275,7 @@ All schemas are JSON Schema Draft 2020-12. Contracts directory in the plugin rep
 }
 ```
 
-**Read normalization (NOT-39):** append-only source is never rewritten. `python/lens_lib/log.py` `normalize_record` / `iter_records` map legacy rows at read time: missing `event` + lens_run shape → `event: lens_run`; `verdict: CORRECT` → `pass`; `lens: default` → `default_lens`; singular `round` → `rounds`; default empty `escalations` / `findings`; absent `host` on `lens_run` / `hook_check` → `claude-code`. New appends stamp `schema_version: 1`.
+**Read normalization (NOT-39):** append-only source is never rewritten. `python/lens_lib/log.py` `normalize_record` / `iter_records` map legacy rows at read time: missing `event` + lens_run shape → `event: lens_run`; `verdict: CORRECT` → `pass` (sole non-canonical legacy verdict in owner log through 2026-08-29); `lens: default` → `default_lens`; singular `round` → `rounds` (legacy key dropped); default empty `escalations` / `findings`; absent `host` on `lens_run` / `hook_check` → `claude-code`. New appends stamp `schema_version: 1`. **Upgrade note:** on first run after this lands, previously invisible legacy rows (no `event`) retroactively count in gates and analytics — expect a one-time bump, not new activity.
 
 ### 7.2 `human_review` record
 

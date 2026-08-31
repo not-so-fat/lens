@@ -33,8 +33,20 @@ class LogNormalizationTests(unittest.TestCase):
         self.assertEqual(norm["event"], "lens_run")
         self.assertEqual(norm["verdict"], "pass")
         self.assertEqual(norm["rounds"], 1)
+        self.assertNotIn("round", norm)
         self.assertEqual(norm["escalations"], [])
         self.assertEqual(norm["host"], "claude-code")
+
+    def test_validate_lens_skip_accepts_schema_version(self):
+        from lens_lib.log import validate_lens_skip_shape
+
+        record = {
+            "ts": "2026-08-31T00:00:00Z",
+            "event": "lens_skip",
+            "schema_version": CURRENT_SCHEMA_VERSION,
+            "deliverable": "x",
+        }
+        self.assertEqual(validate_lens_skip_shape(record), [])
 
     def test_default_lens_name_alias(self):
         raw = json.loads(FIXTURE.read_text(encoding="utf-8").splitlines()[1])
@@ -75,6 +87,35 @@ class LogNormalizationTests(unittest.TestCase):
             )
             raw = json.loads(log.read_text(encoding="utf-8").strip())
             self.assertEqual(raw["schema_version"], CURRENT_SCHEMA_VERSION)
+
+    def test_append_stamps_schema_version_on_other_events(self):
+        import tempfile
+
+        cases = [
+            {"event": "lens_skip", "deliverable": "held-doc"},
+            {
+                "event": "hook_check",
+                "session": "s1",
+                "watched_writes": False,
+                "lens_run_found": True,
+                "blocked": False,
+                "duration_ms": 1.0,
+            },
+            {
+                "event": "human_review",
+                "deliverable": "held-doc",
+                "corrections": 0,
+            },
+        ]
+        with tempfile.TemporaryDirectory() as td:
+            log = Path(td) / "runs.jsonl"
+            for record in cases:
+                append_record(log, record)
+            lines = log.read_text(encoding="utf-8").strip().splitlines()
+            self.assertEqual(len(lines), len(cases))
+            for line in lines:
+                raw = json.loads(line)
+                self.assertEqual(raw["schema_version"], CURRENT_SCHEMA_VERSION)
 
     def test_legacy_row_counts_in_gate_and_analytics(self):
         import shutil
