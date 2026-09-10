@@ -176,6 +176,46 @@ class TranscriptTests(unittest.TestCase):
             self.assertEqual(first_event_ts(str(p)), "2026-07-31T12:00:00.000Z")
             self.assertEqual(written_paths_from_transcript(str(p)), ["/w/out.md"])
 
+    def test_schema_name_property_is_not_a_tool(self):
+        """Transcripts may embed JSON Schema where properties.name is a dict."""
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "t.jsonl"
+            lines = [
+                {
+                    "type": "assistant",
+                    "timestamp": "2026-07-31T12:00:01.000Z",
+                    "attachment": {
+                        "entries": [
+                            {
+                                "input_schema": {
+                                    "properties": {
+                                        "name": {
+                                            "type": "string",
+                                            "description": "display name",
+                                        },
+                                        "toolName": {"type": "string"},
+                                    }
+                                }
+                            }
+                        ]
+                    },
+                    "message": {
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "name": "Write",
+                                "input": {
+                                    "file_path": "/w/ok.md",
+                                    "content": "x",
+                                },
+                            }
+                        ]
+                    },
+                }
+            ]
+            p.write_text("\n".join(json.dumps(x) for x in lines) + "\n")
+            self.assertEqual(written_paths_from_transcript(str(p)), ["/w/ok.md"])
+
 
 class LogAndCheckTests(unittest.TestCase):
     def test_block_without_lens_run(self):

@@ -53,9 +53,18 @@ def _paths_from_tool_input(inp: dict, out: Set[str]) -> None:
             out.add(val)
 
 
+def _tool_name(obj: dict) -> str:
+    """Return a string tool id, or '' if missing/non-string (e.g. JSON Schema props)."""
+    for key in ("name", "toolName"):
+        val = obj.get(key)
+        if isinstance(val, str) and val:
+            return val
+    return ""
+
+
 def _walk(obj, out: Set[str]) -> None:
     if isinstance(obj, dict):
-        name = obj.get("name") or obj.get("toolName") or ""
+        name = _tool_name(obj)
         if name in WRITE_TOOLS:
             inp = obj.get("input") or obj.get("arguments") or {}
             if isinstance(inp, dict):
