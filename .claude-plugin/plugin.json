@@ -1,6 +1,6 @@
 {
   "name": "lens",
-  "version": "0.2.11",
+  "version": "0.2.12",
   "description": "Personal review standards for AI agents — runner, Stop-hook enforcement, run log",
   "author": {
     "name": "lens"

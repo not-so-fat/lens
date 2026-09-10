@@ -13,10 +13,22 @@ Two things create an obligation:
   * an **explicit lens invocation** in the prompt ("arming", F3.5) — so a
     chat deliverable that never wrote a file still gets reviewed.
 
-That shared second exit is why there are no circuit breakers, TTLs, or block
-counters here: the loop keeps looping until one of two *recorded, intentional*
-things happens. "Hold this one" is a real action the worker takes on the
-owner's say-so, not a heuristic the hook has to guess.
+That shared second exit is why there are no circuit breakers, unpaid-obligation
+TTLs, or block counters here: the loop keeps looping until one of two
+*recorded, intentional* things happens. "Hold this one" is a real action the
+worker takes on the owner's say-so, not a heuristic the hook has to guess.
+
+Separate concept — **review in flight** (Claude Code): while a *background*
+lens Agent is already fulfilling the obligation (transcript shows
+``Agent``/``Task`` with a lens ``subagent_type``, and no ``lens_run`` /
+``lens_skip`` since that launch), Stop passes with
+``skip_reason=review_in_flight``. That is not a third exit and not a grace
+period for unpaid work — the parent must not be force-continued into a wait
+spin while the child is on the hook (agent-dealer 77ac33d9: 38 blocks / ~4 min).
+Async Agent returns immediately, so Stop cannot observe liveness; a wall-clock
+**crash backstop** (``REVIEW_IN_FLIGHT_MAX_SECONDS``) only ends the in-flight
+pass when we can no longer treat the child as fulfilling. After that, the
+normal unpaid block resumes.
 """
 
 from __future__ import annotations
@@ -25,6 +37,7 @@ import os
 import re
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -35,9 +48,15 @@ from .log import (
     has_lens_skip_for_sessions,
     latest_gate_ts,
     latest_lens_skip_ts,
+    parse_iso_ts,
 )
 from .paths import BUILTIN_IGNORE_GLOBS, filter_watched, load_lensignore
-from .transcript import gather_writes, prune_sidechannel_file, session_id_from_transcript
+from .transcript import (
+    gather_writes,
+    latest_lens_agent_launch_ts,
+    prune_sidechannel_file,
+    session_id_from_transcript,
+)
 from .util import (
     INVOCATION_TEMPLATE,
     SKIP_TEMPLATE,
@@ -47,6 +66,11 @@ from .util import (
     utc_now_iso,
     workspace_writes_path,
 )
+
+# Crash backstop only: async Agent returns immediately, so Stop cannot see
+# "still running." After this age since launch, stop treating the child as
+# fulfilling. Not an unpaid-obligation grace period.
+REVIEW_IN_FLIGHT_MAX_SECONDS = 30 * 60
 
 
 @dataclass
@@ -337,6 +361,33 @@ def run_check(
     block_armed = bool(cfg.enforce and armed and not armed_satisfied)
     should_block = block_writes or block_armed
 
+    # Background lens Agent already fulfilling the obligation: do not Stop-spam
+    # the parent. Crash backstop (age since launch) only — not a grace TTL.
+    review_in_flight = False
+    if should_block and transcript_path:
+        launch_ts = latest_lens_agent_launch_ts(transcript_path)
+        launch_dt = parse_iso_ts(launch_ts) if launch_ts else None
+        if launch_dt is not None:
+            age_s = (datetime.now(timezone.utc) - launch_dt).total_seconds()
+            if 0 <= age_s <= REVIEW_IN_FLIGHT_MAX_SECONDS:
+                ids_for_inflight = real or (
+                    [session] if session and session != "unknown" else []
+                )
+                since_launch = has_lens_run_for_sessions(
+                    cfg.log_path,
+                    ids_for_inflight,
+                    since_iso=launch_ts,
+                    allow_untagged=allow_untagged,
+                ) or has_lens_skip_for_sessions(
+                    cfg.log_path,
+                    ids_for_inflight,
+                    since_iso=launch_ts,
+                    allow_untagged=allow_untagged,
+                )
+                if not since_launch:
+                    review_in_flight = True
+                    should_block = False
+
     sess_hint = (
         f" Ensure the lens_run includes session={session!r} "
         "(or omit session only on Claude Bash appends)."
@@ -347,7 +398,7 @@ def run_check(
         " If the owner told you to hold this one, record a skip instead so the "
         f"loop stops without a review: {SKIP_TEMPLATE}"
     )
-    if block_writes:
+    if should_block and block_writes:
         message = (
             "Lens enforcement: this session wrote watched files but no matching "
             f"lens_run was logged at or after the session start ({first_ts or 'unknown'})."
@@ -355,7 +406,7 @@ def run_check(
             f"Watched writes: {', '.join(watched[:8])}"
             + ("…" if len(watched) > 8 else "")
         )
-    elif block_armed:
+    elif should_block and block_armed:
         message = (
             "Lens enforcement: you invoked the lens for this session but no matching "
             f"lens_run has been logged since you asked ({armed_ts})."
@@ -386,7 +437,9 @@ def run_check(
     duration_ms = (time.perf_counter() - started) * 1000
 
     skip_reason = None
-    if declined:
+    if review_in_flight:
+        skip_reason = "review_in_flight"
+    elif declined:
         skip_reason = "declined"
     elif (unsatisfied_writes or (armed and not armed_satisfied)) and not cfg.enforce:
         skip_reason = "enforce_false"

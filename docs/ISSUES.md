@@ -88,3 +88,11 @@ Verified live (session `9b1ecf4e-edf5-4a40-be0c-85f3155dc075`, run log):
 **Fix.** Give the loop its real second exit: a **`lens_skip`** record (§7.2b, `/lens-skip`). `run_check` now treats the gate as satisfied by a `lens_run` **or** a `lens_skip` for the session — for both the write gate and the arm gate. With a recorded, intentional "hold" available, all the breakers/TTLs/warn-first were **deleted**: the loop keeps looping until one of two real things happens, and never wedges because the owner always has a one-command exit. A skip is *recorded*, so this is not a silent skip — it is an accountable one.
 
 **Also:** Claude's Stop hook now blocks via `{"decision":"block","reason":…}` (exit 0), the same structured form Codex uses, so enforcement surfaces as *feedback* rather than a "Stop hook error." Arming (I-9) is unchanged in intent but reuses this same two-exit loop instead of its own breaker/TTL.
+
+### I-12 — background lens Agent + Stop tight-loop (token spam)
+
+**Symptom (agent-dealer session `77ac33d9`, 2026-09-10):** parent wrote a watched `.md`, launched async `Agent(subagent_type=lens:lens)`, then Stop blocked **38× in ~4 min** while the parent only said "waiting." Each block re-injected ~1KB × 3 (user/attachment/system) into context. Same class earlier that day on `4503f579` (131 blocks before first `lens_run`). Gate matching was fine — the `lens_run` eventually landed (`verdict=held`); the waste was the wait.
+
+**Concept:** while a background lens child is **fulfilling** the obligation, do not force-continue the parent. That is wait/coordination — not a third recorded exit and not an unpaid-obligation grace TTL (I-10's deleted breakers stay deleted).
+
+**Fix:** transcript shows a lens `Agent`/`Task` launch and no `lens_run`/`lens_skip` since → Stop passes with `skip_reason=review_in_flight`. **Crash backstop only:** async Agent returns immediately so Stop cannot observe liveness; after 30 minutes since launch with still no run/skip, resume blocking. Prefer a future liveness/pending marker if the host exposes one; do not document the backstop as the product meaning.

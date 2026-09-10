@@ -216,6 +216,72 @@ def prune_sidechannel_file(writes_file: str, *, after_ts: Optional[str]) -> None
     path.write_text(("\n".join(kept) + ("\n" if kept else "")), encoding="utf-8")
 
 
+_AGENT_TOOL_NAMES = {"Agent", "Task", "agent", "task"}
+
+
+def _is_lens_subagent_type(value: object) -> bool:
+    """True for host subagent ids that invoke the lens runner (e.g. ``lens:lens``)."""
+    if not isinstance(value, str):
+        return False
+    # Plugin form is often "lens:lens"; bare "lens" also appears.
+    parts = [p for p in value.lower().replace("/", ":").split(":") if p]
+    return "lens" in parts
+
+
+def _obj_launches_lens_agent(obj: object) -> bool:
+    if isinstance(obj, dict):
+        name = _tool_name(obj)
+        if name in _AGENT_TOOL_NAMES or (
+            obj.get("type") == "tool_use" and name in _AGENT_TOOL_NAMES
+        ):
+            inp = obj.get("input") or obj.get("arguments") or {}
+            if isinstance(inp, dict) and _is_lens_subagent_type(
+                inp.get("subagent_type") or inp.get("subagentType")
+            ):
+                return True
+        return any(_obj_launches_lens_agent(v) for v in obj.values())
+    if isinstance(obj, list):
+        return any(_obj_launches_lens_agent(v) for v in obj)
+    return False
+
+
+def latest_lens_agent_launch_ts(transcript_path: str) -> Optional[str]:
+    """Latest transcript timestamp of an Agent/Task tool_use that starts the lens runner.
+
+    Used so Stop can treat a *background* lens review as fulfilling the obligation
+    (``skip_reason=review_in_flight``) instead of force-continuing the parent.
+    Claude returns ``Async agent launched`` immediately; launch detection is the
+    signal we have until a ``lens_run``/``lens_skip`` lands (or the crash backstop
+    in ``run_check`` ends the in-flight pass).
+    """
+    path = Path(transcript_path)
+    if not path.is_file():
+        return None
+    latest_raw: Optional[str] = None
+    latest_dt = None
+    with path.open(encoding="utf-8", errors="replace") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(obj, dict) or not _obj_launches_lens_agent(obj):
+                continue
+            raw = obj.get("timestamp") or obj.get("ts")
+            if not isinstance(raw, str) or not raw:
+                continue
+            dt = parse_iso_ts(raw)
+            if dt is None:
+                continue
+            if latest_dt is None or dt >= latest_dt:
+                latest_dt = dt
+                latest_raw = raw
+    return latest_raw
+
+
 def gather_writes(
     transcript_path: Optional[str],
     sidechannel_path: Optional[str] = None,
