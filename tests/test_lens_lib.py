@@ -307,6 +307,225 @@ class LogAndCheckTests(unittest.TestCase):
                 else:
                     os.environ["HOME"] = old_home
 
+    def test_async_lens_agent_in_flight_does_not_block(self):
+        """Parent Stop must not spin while a background lens Agent is reviewing.
+
+        Live incident (agent-dealer 77ac33d9): async ``lens:lens`` launch, then
+        38 Stop blocks in ~4 min while the parent only said "waiting" — each
+        block re-injected the full enforcement message into context.
+        """
+        from datetime import datetime, timedelta, timezone
+
+        with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:
+            lens = Path(td) / "lens.md"
+            log = Path(td) / "runs.jsonl"
+            lens.write_text(SAMPLE)
+            home = Path(td) / "home"
+            home.mkdir()
+            deliverable = Path(td) / "doc.md"
+            deliverable.write_text("x", encoding="utf-8")
+            old_home = os.environ.get("HOME")
+            os.environ["HOME"] = str(home)
+            os.environ.pop("LENS_LOG_PATH", None)
+            try:
+                write_config(
+                    str(log),
+                    lenses={"review": str(lens)},
+                    default_lens="review",
+                    enforce=True,
+                )
+                now = datetime.now(timezone.utc)
+                ts0 = (now - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+                ts1 = (now - timedelta(minutes=4)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+                ts_launch = (now - timedelta(minutes=1)).strftime(
+                    "%Y-%m-%dT%H:%M:%S.000Z"
+                )
+                transcript = Path(td) / "sess.jsonl"
+                transcript.write_text(
+                    json.dumps(
+                        {
+                            "type": "user",
+                            "timestamp": ts0,
+                            "cwd": str(td),
+                        }
+                    )
+                    + "\n"
+                    + json.dumps(
+                        {
+                            "type": "assistant",
+                            "timestamp": ts1,
+                            "message": {
+                                "content": [
+                                    {
+                                        "type": "tool_use",
+                                        "name": "Write",
+                                        "input": {
+                                            "file_path": str(deliverable),
+                                            "content": "x",
+                                        },
+                                    }
+                                ]
+                            },
+                        }
+                    )
+                    + "\n"
+                    + json.dumps(
+                        {
+                            "type": "assistant",
+                            "timestamp": ts_launch,
+                            "message": {
+                                "content": [
+                                    {
+                                        "type": "tool_use",
+                                        "id": "toolu_lens1",
+                                        "name": "Agent",
+                                        "input": {
+                                            "description": "Lens review of doc",
+                                            "subagent_type": "lens:lens",
+                                            "prompt": "Run a lens review.",
+                                        },
+                                    }
+                                ]
+                            },
+                        }
+                    )
+                    + "\n"
+                    + json.dumps(
+                        {
+                            "type": "user",
+                            "timestamp": ts_launch,
+                            "message": {
+                                "content": [
+                                    {
+                                        "type": "tool_result",
+                                        "tool_use_id": "toolu_lens1",
+                                        "content": (
+                                            "Async agent launched successfully. "
+                                            "agentId=abc"
+                                        ),
+                                    }
+                                ]
+                            },
+                        }
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                result = run_check(
+                    host="claude-code",
+                    transcript_path=str(transcript),
+                    session_id="sess-inflight",
+                    cwd=td,
+                )
+                self.assertTrue(result.watched_writes)
+                self.assertFalse(result.lens_run_found)
+                self.assertFalse(
+                    result.blocked,
+                    "in-flight async lens Agent must not Stop-spam the parent",
+                )
+                self.assertFalse(result.message)
+                lines = [
+                    json.loads(ln)
+                    for ln in log.read_text(encoding="utf-8").splitlines()
+                    if ln.strip()
+                ]
+                checks = [r for r in lines if r.get("event") == "hook_check"]
+                self.assertTrue(checks)
+                self.assertEqual(checks[-1].get("skip_reason"), "review_in_flight")
+            finally:
+                if old_home is None:
+                    os.environ.pop("HOME", None)
+                else:
+                    os.environ["HOME"] = old_home
+
+    def test_stale_lens_agent_launch_still_blocks(self):
+        """A lens Agent launch older than the in-flight window is not a free pass."""
+        from datetime import datetime, timedelta, timezone
+
+        with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:
+            lens = Path(td) / "lens.md"
+            log = Path(td) / "runs.jsonl"
+            lens.write_text(SAMPLE)
+            home = Path(td) / "home"
+            home.mkdir()
+            deliverable = Path(td) / "doc.md"
+            deliverable.write_text("x", encoding="utf-8")
+            old_home = os.environ.get("HOME")
+            os.environ["HOME"] = str(home)
+            os.environ.pop("LENS_LOG_PATH", None)
+            try:
+                write_config(
+                    str(log),
+                    lenses={"review": str(lens)},
+                    default_lens="review",
+                    enforce=True,
+                )
+                now = datetime.now(timezone.utc)
+                # Well outside REVIEW_IN_FLIGHT_MAX_SECONDS (30 min).
+                ts0 = (now - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+                ts1 = (now - timedelta(hours=2) + timedelta(seconds=1)).strftime(
+                    "%Y-%m-%dT%H:%M:%S.000Z"
+                )
+                ts_launch = (now - timedelta(hours=1)).strftime(
+                    "%Y-%m-%dT%H:%M:%S.000Z"
+                )
+                transcript = Path(td) / "sess.jsonl"
+                transcript.write_text(
+                    json.dumps({"type": "user", "timestamp": ts0, "cwd": str(td)})
+                    + "\n"
+                    + json.dumps(
+                        {
+                            "type": "assistant",
+                            "timestamp": ts1,
+                            "message": {
+                                "content": [
+                                    {
+                                        "type": "tool_use",
+                                        "name": "Write",
+                                        "input": {
+                                            "file_path": str(deliverable),
+                                            "content": "x",
+                                        },
+                                    }
+                                ]
+                            },
+                        }
+                    )
+                    + "\n"
+                    + json.dumps(
+                        {
+                            "type": "assistant",
+                            "timestamp": ts_launch,
+                            "message": {
+                                "content": [
+                                    {
+                                        "type": "tool_use",
+                                        "name": "Agent",
+                                        "input": {
+                                            "subagent_type": "lens:lens",
+                                            "prompt": "review",
+                                        },
+                                    }
+                                ]
+                            },
+                        }
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                result = run_check(
+                    host="claude-code",
+                    transcript_path=str(transcript),
+                    session_id="sess-stale",
+                    cwd=td,
+                )
+                self.assertTrue(result.blocked)
+            finally:
+                if old_home is None:
+                    os.environ.pop("HOME", None)
+                else:
+                    os.environ["HOME"] = old_home
+
     def test_close_requires_lens_run(self):
         with tempfile.TemporaryDirectory(dir=str(ROOT)) as td:
             lens = Path(td) / "lens.md"

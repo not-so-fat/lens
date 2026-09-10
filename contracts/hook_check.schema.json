@@ -54,7 +54,7 @@
     },
     "skip_reason": {
       "type": "string",
-      "description": "why enforcement did not block despite activity: declined (a lens_skip cleared it), enforce_false, no_watch_match, excluded_only"
+      "description": "why enforcement did not block despite activity: declined (a lens_skip cleared it), enforce_false, no_watch_match, excluded_only, review_in_flight (background lens Agent fulfilling the obligation; crash backstop may end the pass)"
     },
     "duration_ms": { "type": "number", "minimum": 0 },
     "host": {
